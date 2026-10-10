@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const { test } = require('node:test');
 const ts = require('typescript');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(
-  fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, filename);
+  fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, filename);
 const { HostedApiError, createHostedClient, describeError } = require('./hostedClient.ts');
 
 test('intake refusal preserves documents and gives a useful next step', () => {
@@ -34,4 +34,44 @@ test('one accounting-pending run stops while another run continues polling', asy
   assert.deepEqual(done.map(r => r.status), ['accounting_pending', 'completed']);
   assert.deepEqual(counts, { held: 1, healthy: 2 });
   assert.deepEqual(updates.healthy, ['queued', 'running', 'completed']);
+});
+
+test('read-only requests survive six transient failures without losing the session', async () => {
+  let calls = 0; const sleeps = []; const messages = [];
+  const client = createHostedClient({ sleep: async ms => sleeps.push(ms), fetchImpl: async () => {
+    calls++; if (calls <= 6) return new Response('{}', { status: calls % 2 ? 500 : 503 });
+    return new Response(JSON.stringify({ user_id: 'same-user', csrf_token: 'synthetic' }));
+  } });
+  client.subscribeConnection(message => messages.push(message));
+  const session = await client.session();
+  assert.equal(session.user_id, 'same-user');
+  assert.deepEqual(sleeps, [1000, 2000, 4000, 8000, 16000, 30000]);
+  assert.ok(messages.some(message => message.includes('자동 재시도')));
+  assert.equal(messages.at(-1), '');
+});
+test('mutating requests are never automatically replayed after a transient error', async () => {
+  let calls = 0;
+  const client = createHostedClient({ sleep: async () => {}, fetchImpl: async () => {
+    calls++; return new Response('{}', { status: 503 });
+  } });
+  await assert.rejects(client.login('synthetic'), error => error.status === 503);
+  assert.equal(calls, 1);
+});
+test('401 is surfaced immediately and abort stops transient GET recovery', async () => {
+  let calls = 0;
+  const unauthorized = createHostedClient({ fetchImpl: async () => { calls++; return new Response('{}', { status: 401 }); } });
+  await assert.rejects(unauthorized.session(), error => error.status === 401);
+  assert.equal(calls, 1);
+  const controller = new AbortController();
+  const recovering = createHostedClient({ sleep: async () => controller.abort(), fetchImpl: async () => new Response('{}', { status: 502 }) });
+  await assert.rejects(recovering.runtime(controller.signal), error => error.name === 'AbortError');
+});
+
+test('a disconnected response body recovers with GET and never fabricates an empty result', async () => {
+  let reads = 0;
+  const client = createHostedClient({ sleep: async () => {}, fetchImpl: async () => ++reads === 1
+    ? new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('connection reset')); } }))
+    : new Response(JSON.stringify({ run_id: 'existing', status: 'completed' })) });
+  assert.equal((await client.getRun('/v1/runs/existing')).status, 'completed');
+  assert.equal(reads, 2);
 });

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { focusClaimDetail, focusClaimRegion } from "../claims/claimFocus";
 import { elementLabels } from "../labels";
 import { ProvisionalHold } from "../claims/ProvisionalHold";
 import { HostedApiError, holdReasonText, newIdempotencyKey, type HostedClient, type HostedResult, type ResultClaim, type ResultDecision, type ResultReview } from "./hostedClient";
@@ -8,12 +9,14 @@ import { allowedChoices, buildResolveBody, candidateRefs, decisionLine, elementS
 export function canReview(role: string | null | undefined) { return role === "reviewer" || role === "admin"; }
 
 export function ResultView({ result, role, client, runId, onReload }: { result: HostedResult; role?: string | null; client?: HostedClient; runId?: string; onReload?: () => Promise<void> }) {
+  const detailRef = useRef<HTMLElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(result.claims[0]?.claim_id ?? null);
   const selected = result.claims.find(claim => claim.claim_id === selectedId) ?? result.claims[0] ?? null;
   const counts = useMemo(() => ({
     total: result.claims.length,
     verified: result.claims.filter(c => c.source_quality === "verified").length,
-    confirmed: result.claims.filter(c => c.confirmed_grade).length,
+    confirmed: result.claims.filter(c => gradeSummary(c).confirmed).length,
     open: result.reviews.filter(r => r.status === "open").length,
   }), [result]);
   return <section className="hosted-result" aria-label="분석 결과" data-testid="hosted-result">
@@ -33,24 +36,25 @@ export function ResultView({ result, role, client, runId, onReload }: { result: 
       ? "선택한 범위의 분석이 정상 완료되었으나 환경 주장을 발견하지 못했습니다. 보고서 전체에 주장이 없다는 뜻은 아닙니다."
       : "분석이 보류되어 표시할 주장이 없습니다. 처리 단계와 보류 사유를 확인해 주세요. 근거 없음으로 판정한 결과가 아닙니다."}</p> :
       <div className="claims-layout live-claims-layout">
-        <div className="claim-list" aria-label="분석 결과 주장 목록">{result.claims.map(claim => {
+        <div className="claim-list" aria-label="분석 결과 주장 목록" ref={listRef} tabIndex={-1}>{result.claims.map(claim => {
           const grade = gradeSummary(claim);
-          return <button type="button" className={`claim-item ${selected?.claim_id === claim.claim_id ? "selected" : ""}`} key={claim.claim_id} onClick={() => setSelectedId(claim.claim_id)}>
+          return <button type="button" className={`claim-item ${selected?.claim_id === claim.claim_id ? "selected" : ""}`} key={claim.claim_id} onClick={() => { setSelectedId(claim.claim_id); requestAnimationFrame(() => focusClaimDetail(detailRef.current)); }}>
             <div className="claim-item-top"><span>{pageLabel(result, claim.page_num)} · {claim.track ? trackText[claim.track] ?? claim.track : claim.provisional_track ? `${trackText[claim.provisional_track] ?? claim.provisional_track} · 잠정 분류` : "분류 미합의"}</span>
               <span className={`mini-status ${grade.confirmed ? "good" : "warn"}`}>{grade.confirmed ? decisionLine(claim.decision) : "확정 등급 아님"}</span></div>
             <p>{claim.quote}</p><small>{sourceQualityText(claim.source_quality)}{claim.hold_reason ? ` · ${holdReasonText(claim.hold_reason)}` : ""}</small></button>;
         })}</div>
-        {selected && <ClaimPanel key={selected.claim_id} claim={selected} result={result} role={role} client={client} runId={runId} onReload={onReload} />}
+        {selected && <ClaimPanel key={selected.claim_id} claim={selected} detailRef={detailRef} onBack={() => focusClaimRegion(listRef.current)} result={result} role={role} client={client} runId={runId} onReload={onReload} />}
       </div>}
   </section>;
 }
 
-function ClaimPanel({ claim, result, role, client, runId, onReload }: { claim: ResultClaim; result: HostedResult; role?: string | null; client?: HostedClient; runId?: string; onReload?: () => Promise<void> }) {
+function ClaimPanel({ claim, result, role, client, runId, onReload, detailRef, onBack }: { detailRef: React.RefObject<HTMLElement | null>; onBack: () => void; claim: ResultClaim; result: HostedResult; role?: string | null; client?: HostedClient; runId?: string; onReload?: () => Promise<void> }) {
   const grade = gradeSummary(claim);
   const review = openReviewFor(result, claim.claim_id);
   const refPages = [...new Set(claim.source_refs.map(ref => pageLabel(result, ref.page_num)))];
-  return <aside className="claim-detail">
+  return <aside className="claim-detail" ref={detailRef} tabIndex={-1} aria-label="주장 상세">
     <div className="detail-top"><div><p className="eyebrow">CLAIM DETAIL · {pageLabel(result, claim.page_num)}</p><h3>주장과 판정 근거</h3></div></div>
+    <button type="button" onClick={onBack}>목록으로 돌아가기</button>
     <div className="source-quote"><span>{claim.source_quality === "verified" ? "보고서 원문" : "추출 문장"} · {refPages.join(", ") || pageLabel(result, claim.page_num)}</span>
       <blockquote>“{claim.quote}”</blockquote><small>{sourceQualityText(claim.source_quality)}</small></div>
     <div className="decision-panel" data-testid="grade-panel">

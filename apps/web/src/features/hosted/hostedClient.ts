@@ -160,6 +160,7 @@ export function describeError(error: HostedApiError): string {
 }
 
 export type ClientOptions = { base?: string; fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void> };
+export const connectionRetryMessage = "서버 연결이 잠시 끊겼습니다 — 자동 재시도 중";
 
 export function newIdempotencyKey(): string {
   const bytes = new Uint8Array(16);
@@ -172,8 +173,36 @@ export function createHostedClient(options: ClientOptions = {}) {
   const doFetch = options.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   let csrf = "";
+  const recovering = new Set<symbol>();
+  const listeners = new Set<(message: string) => void>();
+  const notifyConnection = () => listeners.forEach(listener => listener(recovering.size ? connectionRetryMessage : ""));
 
-  async function request<T>(method: "GET" | "POST", path: string, init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<T> {
+  async function wait(ms: number, signal?: AbortSignal) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    let abort: (() => void) | undefined;
+    try {
+      await Promise.race([sleep(ms), new Promise<never>((_, reject) => {
+        if (signal) { abort = () => reject(new DOMException("Aborted", "AbortError")); signal.addEventListener("abort", abort, { once: true }); }
+      })]);
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    } finally { if (abort) signal?.removeEventListener("abort", abort); }
+  }
+
+  async function request<T>(method: "GET" | "POST", path: string, init: Parameters<typeof requestOnce>[2] = {}): Promise<T> {
+    const recovery = Symbol(path); let delay = 1000;
+    try {
+      for (;;) {
+        try { return await requestOnce<T>(method, path, init); }
+        catch (error) {
+          if (method !== "GET" || init.signal?.aborted || !(error instanceof HostedApiError) || !(error.status === 0 || error.status >= 500)) throw error;
+          recovering.add(recovery); notifyConnection();
+          await wait(delay, init.signal); delay = Math.min(delay * 2, 30000);
+        }
+      }
+    } finally { if (recovering.delete(recovery)) notifyConnection(); }
+  }
+
+  async function requestOnce<T>(method: "GET" | "POST", path: string, init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json", ...init.headers };
     if (method !== "GET" && csrf) headers["X-CSRF-Token"] = csrf;
     let body = init.body;
@@ -192,25 +221,34 @@ export function createHostedClient(options: ClientOptions = {}) {
       throw new HostedApiError(response.status, code, Number.isFinite(retry) && retry > 0 ? retry : null, path);
     }
     if (response.status === 204) return undefined as T;
-    return await response.json() as T;
+    try { return await response.json() as T; }
+    catch (error) {
+      if (init.signal?.aborted) throw error;
+      throw new HostedApiError(502, "INVALID_SERVER_RESPONSE", null, path);
+    }
   }
 
   return {
+    subscribeConnection(listener: (message: string) => void) {
+      listeners.add(listener); listener(recovering.size ? connectionRetryMessage : "");
+      return () => { listeners.delete(listener); };
+    },
     get csrfToken() { return csrf; },
     async login(code: string): Promise<Session> {
       const session = await request<Session>("POST", "/v1/auth/invitation", { json: { code: code.trim() } });
       csrf = session.csrf_token; return session;
     },
-    async session(): Promise<Session> {
-      const session = await request<Session>("GET", "/v1/session");
+    async session(signal?: AbortSignal): Promise<Session> {
+      const session = await request<Session>("GET", "/v1/session", { signal });
       csrf = session.csrf_token; return session;
     },
     async logout(): Promise<void> { await request<void>("POST", "/v1/auth/logout"); csrf = ""; },
-    runtime: () => request<Runtime>("GET", "/v1/runtime"),
+    runtime: (signal?: AbortSignal) => request<Runtime>("GET", "/v1/runtime", { signal }),
+    getDocument: (documentId: string, signal?: AbortSignal) => request<HostedDocument>("GET", `/v1/documents/${encodeURIComponent(documentId)}`, { signal }),
     uploadDocument: (file: Blob, key = newIdempotencyKey(), signal?: AbortSignal) =>
       request<HostedDocument>("POST", "/v1/documents", { body: file, headers: { "Content-Type": "application/pdf", "Idempotency-Key": key }, signal }),
     scopePlan: (documentId: string) => request<ScopePlan>("POST", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan`),
-    getScopePlan: (documentId: string) => request<ScopePlan>("GET", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan`),
+    getScopePlan: (documentId: string, signal?: AbortSignal) => request<ScopePlan>("GET", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan`, { signal }),
     editScope: (documentId: string, scope: ScopePlan, claims: number[], evidence: number[], period?: ReportingScopeInput) =>
       request<ScopePlan>("POST", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan/selection`, { json: { selected_claim_pages: claims, selected_evidence_pages: evidence, ...(period ? { reporting_scope: period } : {}) }, headers: { "If-Match": `"${scope.revision}"` } }),
     createRun: (documentId: string, scope: ScopePlan, key = newIdempotencyKey(), profile?: string) =>
@@ -227,19 +265,17 @@ export function createHostedClient(options: ClientOptions = {}) {
 
     /** Poll until a terminal status. Backoff 1s -> 10s; honours 429 Retry-After; stops on abort. */
     async pollRun(first: HostedRun, onUpdate: (run: HostedRun) => void, signal?: AbortSignal): Promise<HostedRun> {
-      let run = first; let delay = 1000; let failures = 0;
+      let run = first; let delay = 1000;
       onUpdate(run);
       while (!terminalStatuses.includes(run.status)) {
-        await sleep(delay);
-        if (signal?.aborted) return run;
+        try { await wait(delay, signal); } catch { if (signal?.aborted) return run; throw new Error("조회 대기 실패"); }
         try {
-          run = await this.getRun(run.status_url, signal); failures = 0; onUpdate(run);
+          run = await this.getRun(run.status_url, signal); onUpdate(run);
           delay = Math.min(Math.round(delay * 1.5), 10000);
         } catch (error) {
           if (signal?.aborted) return run;
           if (!(error instanceof HostedApiError)) throw error;
           if (error.status === 429) { delay = Math.max(delay, (error.retryAfter ?? 5) * 1000); continue; }
-          if ((error.status === 0 || error.status >= 502) && ++failures < 5) { delay = Math.min(delay * 2, 10000); continue; }
           throw error;
         }
       }

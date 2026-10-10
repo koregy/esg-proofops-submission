@@ -462,3 +462,7 @@ main.landing .faq-inner li:last-child { margin-bottom: 0 !important }
 /* Guide page: compact intro and centred section headings like the other guide blocks */
 main.guide-main > section.hero { padding: 96px 40px 72px !important }
 main.guide-main .uses-head { text-align: center }
+
+.claim-detail, .claim-list { scroll-margin-top: 84px }
+.prompt > h2 { font-size: 19px; margin: 20px 24px 10px }
+.prompt > p { margin: 0 24px 20px; color: var(--ink-2); line-height: 1.7 }

@@ -5,7 +5,7 @@ const ts = require("typescript");
 for (const extension of [".ts", ".tsx"]) {
   require.extensions[extension] = (module, filename) => module._compile(ts.transpileModule(
     fs.readFileSync(filename, "utf8"), { compilerOptions: {
-      module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText, filename);
 }
 const React = require("react");
@@ -58,4 +58,17 @@ test("v2 whole range shows actionable hold without confirming unknown", () => {
   assert.match(html, /등급 검토에 필요한 근거 요소/);
   assert.match(html, /원문 확인 필요/);
   assert.doesNotMatch(html, /확정 등급 E[0-3]/);
+});
+
+test('stale confirmed-grade fields cannot display a final label on an unverified or held claim', () => {
+  for (const override of [{ source_quality: 'unverified' }, { source_quality: 'verified', decision_status: 'blocked_evidence' }]) {
+    const stale = { ...claim, source_quality: override.source_quality, confirmed_grade: 'E0',
+      decision: { decision_status: override.decision_status ?? 'decided', evidence_grade: 'E0', label: 'UNSUBSTANTIATED' },
+      provisional_grade: null, possible_grade_range: { floor: 'E0', ceiling: 'E3', open_elements: ['P3'] } };
+    const summary = gradeSummary(stale);
+    assert.equal(summary.confirmed, false);
+    const html = renderToStaticMarkup(React.createElement(ResultView, { result: { ...result, claims: [stale] } }));
+    assert.doesNotMatch(html, /UNSUBSTANTIATED/);
+    assert.match(html, /E0–E3/);
+  }
 });

@@ -75,8 +75,16 @@ for (const [status, code, retry, expect] of [
 }
 const failing = c.createHostedClient({ fetchImpl: async () => json(429, { error: { code: "QUEUE_FULL" } }, { "Retry-After": "60" }) });
 await assert.rejects(failing.runtime(), e => e.status === 429 && e.retryAfter === 60);
-const down = c.createHostedClient({ fetchImpl: async () => { throw new TypeError("net"); } });
-await assert.rejects(down.runtime(), e => e.status === 0);
+let reconnectCalls = 0; const reconnectMessages = [];
+const down = c.createHostedClient({ sleep: async () => {}, fetchImpl: async () => {
+  if (++reconnectCalls === 1) throw new TypeError("net");
+  return json(200, { analysis_backend: "r108" });
+} });
+down.subscribeConnection(message => reconnectMessages.push(message));
+assert.equal((await down.runtime()).analysis_backend, "r108");
+assert.equal(reconnectCalls, 2);
+assert.ok(reconnectMessages.some(message => message.includes("자동 재시도")));
+assert.equal(reconnectMessages.at(-1), "");
 
 // polling: backoff grows, 429 Retry-After honoured, stops at terminal
 const sleeps = []; let n = 0;

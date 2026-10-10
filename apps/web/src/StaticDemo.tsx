@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, Route, Routes, useLocation, useParams } from "react-router";
 import { LiveClaim } from "./features/live/LiveClaim";
 import { LiveReport, type LiveResultClaim } from "./features/live/LiveReport";
 import { ReplayPage, replayPath } from "./features/replay/route";
@@ -10,6 +10,8 @@ import AuditReportPage from "./features/auditreport/AuditReportPage";
 import { auditReportRoute } from "./features/auditreport/route";
 import { DecisionGuide, GuideHelp } from "./DecisionGuide";
 import { elementLabels } from "./features/labels";
+import { canShowFinalLabel } from "./features/hosted/resultModel";
+import { focusClaimDetail, focusClaimRegion } from "./features/claims/claimFocus";
 import { HostedAnalysis } from "./features/hosted/HostedAnalysis";
 import { resolveBackend } from "./features/hosted/hostedClient";
 import "./features/hosted/hosted.css";
@@ -161,9 +163,6 @@ function ReportPreview({ data }: { data: Snapshot }) {
 }
 
 function Landing() {
-  const navigate = useNavigate();
-  const [draft, setDraft] = useState("");
-  const example = "업로드 한 보고서 및 재무제표를 기반으로, 그린워싱으로 판별된 리스크가 높은 문장과 그 원인을 분석해줘.";
   const tools: [string, string, string, string][] = [
     ["/analyze", "보고서 분석", "어떤 기업 보고서든 선택한 쪽을 바로 분석합니다", "t-upload"],
     ["/demo", "분석 사례 · N사", "N사 2025 보고서의 주장·근거·판정", "t-results"],
@@ -171,14 +170,15 @@ function Landing() {
   ];
   return <main className="landing">
     <section className="hero">
-      <p className="eyebrow-c">ESG · 지속가능경영보고서 공시 검증</p>
+      <p className="eyebrow-c">ESG · 지속가능경영보고서 공시 근거 점검</p>
       <h1 className="hero-brand">ProofOps</h1>
       <p className="hero-sub">기업 보고서 내 환경 주장의 근거를 공시 안에서 찾으며, 규칙엔진을 기반으로 근거 수준을 판정합니다. 근거에 대한 쪽수·원문 인용 또는 확인 범위가 함께 표시됩니다.</p>
       <Link className="pill pill-dark" to="/analyze">보고서 분석 시작 <span aria-hidden="true">→</span></Link>
-      <form className="prompt" onSubmit={event => { event.preventDefault(); navigate("/analyze"); }}>
-        <textarea aria-label="분석 요청" value={draft} onChange={event => setDraft(event.target.value)} placeholder={example} rows={3} />
-        <div className="prompt-bar"><div className="chips"><Link to="/analyze" className="chip"><span className="ic">⬆</span>PDF 업로드</Link><Link to="/demo" className="chip"><span className="ic">◎</span>분석 사례</Link><Link to="/guide" className="chip"><span className="ic">◇</span>서비스 가이드라인</Link></div><button type="submit" className="send" aria-label="보고서 분석">↑</button></div>
-      </form>
+      <div className="prompt" role="region" aria-label="PDF 업로드 안내">
+        <h2>보고서 PDF로 공시 근거를 점검하세요</h2>
+        <p>지속가능경영보고서 PDF를 올린 뒤 분석할 쪽을 확인하세요. 공시 문장의 원문 근거 수준을 점검하며 진위나 위법 여부를 판정하지 않습니다.</p>
+        <div className="prompt-bar"><div className="chips"><Link to="/analyze" className="chip"><span className="ic">⬆</span>PDF 업로드</Link><Link to="/demo" className="chip"><span className="ic">◎</span>분석 사례</Link><Link to="/guide" className="chip"><span className="ic">◇</span>서비스 가이드라인</Link></div></div>
+      </div>
       <p className="hero-note">PDF를 올리면 분석할 쪽을 골라 바로 분석합니다</p>
     </section>
 
@@ -271,10 +271,11 @@ function CountUp({ value }: { value: number }) {
   return <>{count}</>;
 }
 
+function finalCase(claim: Claim) { return !!claim.decision.grade && canShowFinalLabel(claim.source_verified, claim.decision.status, !!claim.decision.estimated || !!claim.decision.display_note); }
 function gradeText(claim: Claim) {
   if (!claim.source_verified) return "원문 대조 필요";
   if (claim.decision.display_note) return claim.decision.display_grade ? `${claim.decision.display_grade} · 예비 등급` : "원문 대조 필요";
-  if (claim.decision.grade) return claim.decision.grade;
+  if (finalCase(claim)) return claim.decision.grade!;
   if (claim.decision.display_grade) return `${claim.decision.display_grade} · 예비 등급`;
   const range = claim.decision.grade_range;
   if (range) return `${range.floor}–${range.ceiling} 가능`;
@@ -296,7 +297,7 @@ function gradeWhy(claim: Claim) {
     .map(element => `${element.id} ${elementLabels[element.id] || "요소"}는 ${element.evidence.slice(0, 3).map(ref => `${ref.page != null ? `p.${ref.page} ` : ""}“${ref.quote.slice(0, 65)}”`).join(" · ")}에서 확인`);
   const evidence = confirmed.length ? `${confirmed.join(", ")}됐습니다. ` : claim.source_verified ? "연결된 확인 근거가 아직 없습니다. " : "원문 대조가 필요합니다. ";
   if (decision.display_note) return claim.source_verified ? `${evidence}핵심 근거 일부가 확인되기 전의 예비 판정입니다.` : "원문 대조가 필요합니다.";
-  if (decision.grade) {
+  if (finalCase(claim)) {
     const next = decision.grade === "E0" ? "E1" : decision.grade === "E1" ? "E2" : decision.grade === "E2" ? "E3" : null;
     const missing = next && ladder?.[next].filter(id => !claim.elements.some(element => element.id === id && element.state === "present" && element.evidence.length));
     return `${trackText[claim.track || ""] || "해당"} 주장입니다. ${evidence}규칙 판정은 ${decision.grade}${decision.label ? ` (${decision.label})` : ""}입니다. ${next ? `${next}로 올라가려면 ${missing?.length ? missing.map(id => `${id} ${elementLabels[id]}`).join("·") + " 근거가 더 필요합니다." : "추가 규칙 요건을 충족해야 합니다."}` : "현재 사다리의 최상위 등급입니다."}`;
@@ -307,10 +308,11 @@ function gradeWhy(claim: Claim) {
 
 type Queue = "decided" | "estimated" | "unverified" | "unclassified";
 function queueFor(claim: Claim): Queue {
+  if (!claim.source_verified) return "unverified";
   const bucket = claim.review_bucket;
-  if (bucket === "decided" || bucket === "estimated" || bucket === "unverified" || bucket === "unclassified") return bucket;
+  if ((bucket === "decided" && finalCase(claim)) || bucket === "estimated" || bucket === "unverified" || bucket === "unclassified") return bucket;
   if (claim.decision.display_note === "원문 미검증" || !claim.source_verified) return "unverified";
-  if (claim.decision.grade && !claim.decision.estimated) return "decided";
+  if (finalCase(claim)) return "decided";
   if (claim.decision.display_note === "추정") return "estimated";
   if (claim.decision.estimated || claim.decision.display_grade) return "estimated";
   if (claim.decision.grade_range) return "estimated";
@@ -332,8 +334,11 @@ function Demo({ data }: { data: Snapshot }) {
     const requested = new URLSearchParams(routeSearch).get("queue");
     return queues.includes(requested as Queue) ? requested as Queue : queueFor(data.claims.find(claim => claim.id === claimId) || data.claims.find(claim => claim.decision.grade) || data.claims[0]);
   });
+  const detailRef = useRef<HTMLElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectQueue = (name: Queue) => { setQueue(name); setGrade("all"); setStatus("all"); setLimit(25); };
   const explicit = data.claims.find(claim => claim.id === claimId && queueFor(claim) === queue) || null;
-  useEffect(() => { if (hash === "#claims") document.getElementById("claims")?.scrollIntoView(); }, [hash, claimId]);
+  useEffect(() => { if (claimId && explicit) focusClaimDetail(detailRef.current); else if (hash === "#claims") focusClaimRegion(listRef.current); }, [hash, claimId, explicit]);
   const filtered = useMemo(() => data.claims.filter(claim => {
     if (queueFor(claim) !== queue) return false;
     if (track !== "all" && (claim.track || "unknown") !== track) return false;
@@ -352,9 +357,12 @@ function Demo({ data }: { data: Snapshot }) {
     <section className="overview-grid"><div className="surface funnel-card"><div className="card-heading"><div><p className="eyebrow">PROCESS FUNNEL</p><h2>처리 흐름</h2></div><span>추출 → 태깅 → 판정</span></div><div className="funnel-list">{data.funnel.map((step, index) => <div className="funnel-row" key={step.label}><span className="step-name"><b>{String(index + 1).padStart(2, "0")}</b>{["추출 주장", "원문 검증", "예비 분류", "관계 분석", "요소 분석", "등급 표시"][index] || step.label}</span><div className="bar-track"><div style={{ width: `${Math.max(step.count / data.coverage.claims_discovered * 100, 3)}%` }} /></div><strong>{step.count}</strong></div>)}</div></div>
       <div className="surface grade-card"><p className="eyebrow">DECISION DISTRIBUTION</p><h2>등급과 보류 <GuideHelp topic="grade" /><GuideHelp topic="range" /></h2><div className="grade-bars"><div><span><b>확정</b> 규칙 판정</span><strong>{counts.decided}</strong></div><div className="grade-line e3"><i style={{ width: `${counts.decided / data.claims.length * 100}%` }} /></div><div><span><b>예비 등급</b> <GuideHelp topic="estimated" /></span><strong>{counts.range}</strong></div><div className="grade-line range"><i style={{ width: `${counts.range / data.claims.length * 100}%` }} /></div><div><span><b>나머지</b> 확인 대기</span><strong>{counts.pending}</strong></div><div className="grade-line pending"><i style={{ width: `${counts.pending / data.claims.length * 100}%` }} /></div></div><p className="caption">전체 {data.claims.length}건 중 확정 판정과 예비 등급을 구분해 표시합니다.</p></div></section>
     <section className="claims-section" id="claims"><div className="card-heading"><div><p className="eyebrow">CLAIM REVIEW</p><h2>문장별 결과</h2><p>상태를 선택하고 문장을 열어 원문과 요소별 근거를 확인하세요.</p></div><span>{filtered.length} / {data.claims.length}건</span></div>
-      <div className="queue-tabs" role="tablist" aria-label="검토 상태">{queues.map(name => <button type="button" role="tab" aria-selected={queue === name} key={name} onClick={() => { setQueue(name); setGrade("all"); setStatus("all"); setLimit(25); }}>{queueLabels[name]} <span>{queueCounts[name]}</span></button>)}</div>
+      <div className="queue-tabs" role="tablist" aria-label="검토 상태">{queues.map((name, index) => <button type="button" role="tab" id={`queue-${name}`} aria-controls="case-claims-panel" tabIndex={queue === name ? 0 : -1} aria-selected={queue === name} key={name} onClick={() => selectQueue(name)} onKeyDown={event => {
+        const target = event.key === "ArrowRight" ? (index + 1) % queues.length : event.key === "ArrowLeft" ? (index + queues.length - 1) % queues.length : event.key === "Home" ? 0 : event.key === "End" ? queues.length - 1 : null;
+        if (target !== null) { event.preventDefault(); selectQueue(queues[target]); document.getElementById(`queue-${queues[target]}`)?.focus(); }
+      }}>{queueLabels[name]} <span>{queueCounts[name]}</span></button>)}</div>
       <div className="filters"><label>검색<input value={search} onChange={event => { setSearch(event.target.value); setLimit(25); }} placeholder="문장, 페이지 검색" /></label><label>트랙 <GuideHelp topic="track" /><select value={track} onChange={event => { setTrack(event.target.value); setLimit(25); }}><option value="all">전체 트랙</option><option value="management">관리체계</option><option value="goal">목표</option><option value="performance">성과</option><option value="unknown">분류 미합의</option></select></label><label>등급 <GuideHelp topic="grade" /><select value={grade} onChange={event => { setGrade(event.target.value); setLimit(25); }}><option value="all">전체 등급</option>{["E3", "E2", "E1", "E0"].map(value => <option key={value} value={value}>{value}</option>)}<option value="range">추정</option><option value="none">미판정</option></select></label><label>상태 <GuideHelp topic="state" /><select value={status} onChange={event => { setStatus(event.target.value); setLimit(25); }}><option value="all">전체 상태</option><option value="decided">규칙 판정</option><option value="blocked_evidence">근거 보류</option><option value="not_run">미판정</option></select></label></div>
-      <div className="claims-layout"><div className="claim-list" aria-label="주장 목록">{filtered.slice(0, limit).map(claim => <Link className={`claim-item ${selected?.id === claim.id ? "selected" : ""}`} to={`/demo/${claim.id}?queue=${queue}#claims`} key={claim.id}><div className="claim-item-top"><span>p.{claim.page ?? "?"} · {claim.track ? trackText[claim.track] : <span title="트랙 태깅 합의 전">분류 미합의 ⓘ</span>}</span><span className={`mini-status ${queueFor(claim) === "decided" ? "good" : queueFor(claim) === "estimated" || queueFor(claim) === "unverified" ? "warn" : "muted"}`}>{gradeText(claim)}</span></div><p>{claim.quote}</p><small>{(!claim.source_verified ? "원문 대조 필요" : claim.decision.estimated ? "예비 등급" : statusText[claim.decision.status] || claim.decision.status) }{claim.review.audit === "uncertain" ? " · 사용자 확인 완료" : ""}</small></Link>)}{filtered.length === 0 ? <p className="empty">조건에 맞는 주장이 없습니다.</p> : null}{filtered.length > limit ? <button className="more-button" onClick={() => setLimit(limit + 25)}>더 보기 ({filtered.length - limit}건 남음)</button> : null}</div><ClaimDetail key={selected?.id || "empty"} claim={selected} queue={queue} /></div>
+      <div className="claims-layout" role="tabpanel" id="case-claims-panel" aria-labelledby={`queue-${queue}`}><div className="claim-list" ref={listRef} tabIndex={-1} aria-label="주장 목록">{filtered.slice(0, limit).map(claim => <Link className={`claim-item ${selected?.id === claim.id ? "selected" : ""}`} to={`/demo/${claim.id}?queue=${queue}#claims`} key={claim.id}><div className="claim-item-top"><span>p.{claim.page ?? "?"} · {claim.track ? trackText[claim.track] : <span title="트랙 태깅 합의 전">분류 미합의 ⓘ</span>}</span><span className={`mini-status ${queueFor(claim) === "decided" ? "good" : queueFor(claim) === "estimated" || queueFor(claim) === "unverified" ? "warn" : "muted"}`}>{gradeText(claim)}</span></div><p>{claim.quote}</p><small>{(!claim.source_verified ? "원문 대조 필요" : claim.decision.estimated ? "예비 등급" : statusText[claim.decision.status] || claim.decision.status) }{claim.review.audit === "uncertain" ? " · 사용자 확인 완료" : ""}</small></Link>)}{filtered.length === 0 ? <p className="empty">조건에 맞는 주장이 없습니다.</p> : null}{filtered.length > limit ? <button className="more-button" onClick={() => setLimit(limit + 25)}>더 보기 ({filtered.length - limit}건 남음)</button> : null}</div><ClaimDetail key={selected?.id || "empty"} detailRef={detailRef} onBack={() => focusClaimRegion(listRef.current)} claim={selected} queue={queue} /></div>
     </section>
     <DecisionGuide />
   </main>;
@@ -392,15 +400,16 @@ function LiveClaimBrowser({ claims }: { claims: LiveResultClaim[] }) {
     <ClaimDetail claim={selected} queue={queueFor(selected || items[0])} embedded /></div>;
 }
 
-function ClaimDetail({ claim, queue, embedded = false }: { claim: Claim | null; queue: Queue; embedded?: boolean }) {
+function ClaimDetail({ claim, queue, embedded = false, detailRef, onBack }: { claim: Claim | null; queue: Queue; embedded?: boolean; detailRef?: React.RefObject<HTMLElement | null>; onBack?: () => void }) {
   const [reviewMode, setReviewMode] = useState(false);
   if (!claim) return <aside className="claim-detail"><div className="detail-empty"><span>↖</span><h3>주장을 선택하세요</h3><p>왼쪽 목록에서 문장을 선택하면 근거와 판정 경로를 볼 수 있습니다.</p></div></aside>;
   const d = claim.decision;
-  return <aside className="claim-detail"><div className="detail-top"><div><p className="eyebrow">CLAIM DETAIL · p.{claim.page ?? "?"}</p><h3>주장과 판정 근거</h3></div>{!embedded && <Link to={`/demo?queue=${queue}#claims`} aria-label="상세 닫기">×</Link>}</div><div className="source-quote"><span>{claim.source_verified ? "보고서 원문" : "추출 문장"} · p.{claim.page ?? "?"}</span><blockquote>“{claim.quote}”</blockquote><small>{claim.source_verified ? "원문 인용 검증 기록 있음" : "원문 대조 필요"}</small></div>
+  return <aside className="claim-detail" ref={detailRef} tabIndex={-1} aria-label="주장 상세"><div className="detail-top"><div><p className="eyebrow">CLAIM DETAIL · p.{claim.page ?? "?"}</p><h3>주장과 판정 근거</h3></div>{!embedded && <Link to={`/demo?queue=${queue}#claims`} aria-label="상세 닫기">×</Link>}</div><div className="source-quote"><span>{claim.source_verified ? "보고서 원문" : "추출 문장"} · p.{claim.page ?? "?"}</span><blockquote>“{claim.quote}”</blockquote><small>{claim.source_verified ? "원문 인용 검증 기록 있음" : "원문 대조 필요"}</small></div>
+    {onBack && <Link to={`/demo?queue=${queue}#claims`} onClick={() => requestAnimationFrame(onBack)}>목록으로 돌아가기</Link>}
     {!embedded && <div className="detail-actions"><button type="button" aria-pressed={reviewMode} onClick={() => setReviewMode(!reviewMode)}>검토 모드 {reviewMode ? "닫기" : "열기"}</button><Link to={`/report/naver`}>보고서 ↗</Link></div>}
     {reviewMode && <ReviewSimulator claim={claim} />}
     <div className="why-panel"><h4>왜 이 등급인가 <GuideHelp topic="grade" /></h4><p>{gradeWhy(claim)}{claim.note ? ` ${claim.note}` : ""}</p></div>
-    <div className="decision-panel"><span>{!claim.source_verified ? "원문 대조 필요" : d.display_note ? "예비 등급" : "분석 결과"}</span><strong>{gradeText(claim)} <GuideHelp topic={d.estimated ? "estimated" : d.grade_range ? "range" : "grade"} /></strong><p>{d.label || d.display_label || statusText[d.status] || d.status} <GuideHelp topic="label" /></p></div>
+    <div className="decision-panel"><span>{!claim.source_verified ? "원문 대조 필요" : d.display_note ? "예비 등급" : "분석 결과"}</span><strong>{gradeText(claim)} <GuideHelp topic={d.estimated ? "estimated" : d.grade_range ? "range" : "grade"} /></strong><p>{finalCase(claim) ? d.label || statusText[d.status] : `판정 보류${d.grade_range ? ` (가능 범위 ${d.grade_range.floor}–${d.grade_range.ceiling})` : " (가능 범위 미확인)"}`} <GuideHelp topic={finalCase(claim) ? "label" : "range"} /></p></div>
     <div className="detail-block"><h4>요소별 근거 <GuideHelp topic="state" /></h4>{claim.elements.length ? <div className="element-table-wrap"><table className="element-table"><thead><tr><th>요소</th><th>상태</th><th>근거 문구</th></tr></thead><tbody>{claim.elements.map(element => <tr key={element.id}><th scope="row"><b>{element.id}</b><span>{elementLabels[element.id] || element.id}</span></th><td><span className={`element-state ${element.state}`}>{!claim.source_verified && element.state === "present" ? "원문 대조 필요" : stateText[element.state] || element.state}</span></td><td>{element.evidence.length ? element.evidence.map((ref, index) => <p key={index}>{ref.page != null && <small>p.{ref.page}</small>} “{ref.quote}”</p>) : <span className="no-evidence">연결된 근거 문구 없음</span>}</td></tr>)}</tbody></table></div> : <p className="caption">요소 태깅 전입니다. 빈 요소를 absent로 보지 않습니다.</p>}</div>
     <div className="provenance"><span className="badge blue">{claim.decision.estimated ? "예비 등급" : "분석 결과"}</span></div>
   </aside>;

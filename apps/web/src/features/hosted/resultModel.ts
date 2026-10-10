@@ -9,6 +9,7 @@ export function elementStateText(state: string, sourceQuality: string): string {
   if (state === "present") return sourceQuality === "verified" ? "근거 확인" : "원문 대조 필요";
   if (state === "unknown") return "확인되지 않음(근거 없음 아님)";
   if (state === "absent") return "근거 없음(검증된 검색 범위)";
+  if (state === "unreadable") return "판독 불가";
   if (state === "conflict") return "근거 충돌";
   if (state === "not_applicable") return "비적용";
   return state;
@@ -33,10 +34,14 @@ export function decisionLine(decision: ResultDecision | null): string | null {
   return `${decision.evidence_grade}${decision.label ? ` · ${decision.label}` : ""}`;
 }
 
+export function canShowFinalLabel(sourceVerified: boolean, decisionStatus: string | undefined, provisional = false): boolean {
+  return sourceVerified && decisionStatus === "decided" && !provisional;
+}
+
 /** Confirmed grade and possible range are kept apart; a range never becomes a grade. */
 export function gradeSummary(claim: ResultClaim): { confirmed: boolean; headline: string; note: string } {
   const grade = claim.confirmed_grade;
-  if (grade) {
+  if (grade && canShowFinalLabel(claim.source_quality === "verified", claim.decision?.decision_status)) {
     const prov = reviewStatusText(claim.decision?.review_status);
     return { confirmed: true, headline: `확정 등급 ${decisionLine(claim.decision) ?? grade}`, note: prov };
   }
