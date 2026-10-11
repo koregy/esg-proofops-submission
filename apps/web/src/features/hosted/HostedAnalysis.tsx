@@ -5,6 +5,15 @@ import { MyReports } from "./MyReports";
 import { ResultView } from "./HostedResult";
 import { forgetDocumentHistory, historyKey, readHistory, rememberHistory, runIdFromHash, validResourceId, type HistoryEntry } from "./hostedHistory";
 
+// Session-scoped history only: browser storage is disallowed (security contract);
+// re-entry after reload uses the server run list API and #run links.
+const historyMemory = new Map<string, string>();
+const historyStore = {
+  getItem: (key: string) => historyMemory.get(key) ?? null,
+  setItem: (key: string, value: string) => void historyMemory.set(key, value),
+  removeItem: (key: string) => void historyMemory.delete(key),
+};
+
 const scopeCategory: Record<string, string> = { ceo_message: "CEO 메시지", e_narrative: "환경 본문", assurance: "검증 의견서", gri_index: "GRI 색인", environmental_data: "환경 데이터", esg_data: "ESG 데이터", appendix: "부록", toc: "목차", conflict: "분류 충돌", unreadable: "판독 불가", unknown: "분류 미확인", other: "기타" };
 const scopeReason: Record<string, string> = { section_boundaries_disagree: "구역 경계가 서로 다름", native_text_missing_or_unusable: "문자층을 읽을 수 없음", navigation_is_not_claim_text: "목차는 주장 본문에서 제외", evidence_search_only: "근거 검색 전용", native_heading: "쪽 제목 기준", section_container: "구역 분류 기준", front_20_pages: "앞쪽 20쪽 범위", ceo_title: "CEO 제목 확인", claim_extraction_candidate: "주장 추출 후보", environmental_section: "환경 구역", readable_environmental_body: "읽을 수 있는 환경 본문", physical_page_heading: "실제 쪽 제목", environmental_density: "환경 내용 밀도", source_role_unresolved: "기존 구역 분류 미확인", insufficient_environmental_body_density: "환경 본문 밀도 부족", "scope_only_intro_ceo_hierarchy;original_conflict_preserved": "CEO 구역으로 제안하되 원래 분류 충돌 보존" };
 const scopeStatus: Record<string, string> = { candidate_only: "자동 선택 후보", proposed: "자동 선택 제안", ready: "범위 선택 완료", selected: "선택 완료", failed: "자동 선택 실패", unknown: "분류 미확인", conflict: "분류 충돌", unreadable: "판독 불가" };
@@ -90,7 +99,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
       const next = await client.getRun(`/v1/runs/${id}`);
       const document = await client.getDocument(next.document_id);
       if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
-      if (session) setHistory(rememberHistory(localStorage, historyKey(session), { documentId: document.document_id, name: `기존 보고서 ${document.document_id.slice(0, 8)}`, runId: id, seenAt: Date.now() }));
+      if (session) setHistory(rememberHistory(historyStore, historyKey(session), { documentId: document.document_id, name: `기존 보고서 ${document.document_id.slice(0, 8)}`, runId: id, seenAt: Date.now() }));
       setIntake(items => items.some(item => item.runId === id) ? items : [...items, { key: id, name: `기존 보고서 ${document.document_id.slice(0, 8)}`, doc: document, runId: id, restoreRunId: id, restored: true }]);
       window.history.replaceState(null, "", `#run-${id}`);
       requestAnimationFrame(() => documentElement(id)?.scrollIntoView({ block: "start" }));
@@ -100,7 +109,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
   useEffect(() => {
     if (!session) return;
     let live = true; const controller = new AbortController();
-    const saved = readHistory(localStorage, historyKey(session)); setHistory(saved);
+    const saved = readHistory(historyStore, historyKey(session)); setHistory(saved);
     void (async () => {
       const id = runIdFromHash(window.location.hash); if (live && id) await openRun(id);
     })();
@@ -111,7 +120,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
   const restoreBrowserHistory = useCallback((signal: AbortSignal) => {
     if (!session) return;
     void (async () => {
-      for (const entry of readHistory(localStorage, historyKey(session)).slice(-5)) {
+      for (const entry of readHistory(historyStore, historyKey(session)).slice(-5)) {
         try {
           const doc = await client.getDocument(entry.documentId, signal);
           if (!signal.aborted && currentSession.current && historyKey(currentSession.current) === historyKey(session)) setIntake(items => items.some(item => (item.runId ?? item.doc?.document_id) === (entry.runId ?? entry.documentId)) ? items : [...items, { key: entry.runId ?? entry.documentId, name: entry.name, doc, runId: entry.runId, restoreRunId: entry.runId, restored: true }]);
@@ -121,7 +130,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
   }, [session, client, fail]);
   function remember(doc: HostedDocument, name: string, run?: HostedRun) {
     if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
-    setHistory(rememberHistory(localStorage, historyKey(session), { documentId: doc.document_id, name, runId: run?.run_id, seenAt: Date.now() }));
+    setHistory(rememberHistory(historyStore, historyKey(session), { documentId: doc.document_id, name, runId: run?.run_id, seenAt: Date.now() }));
     if (run && validResourceId(run.run_id)) {
       setIntake(items => items.map(item => item.doc?.document_id === doc.document_id && !item.runId ? { ...item, runId: run.run_id } : item));
       window.history.replaceState(null, "", `#run-${run.run_id}`);
@@ -189,7 +198,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
     </form>
     <ul className="hosted-documents" aria-label="문서별 분석 상태">
       {intake.map(item => <li key={item.key}>
-        {item.doc ? <HostedDocumentAnalysis name={item.name} doc={item.doc} client={client} runtime={runtime} session={session} initialRunId={item.restoreRunId} restored={item.restored} onAccepted={run => remember(item.doc!, item.name, run)} onExpired={expire} onRemoved={() => { setIntake(items => items.filter(next => next.doc?.document_id !== item.doc!.document_id)); if (session) setHistory(forgetDocumentHistory(localStorage, historyKey(session), item.doc!.document_id)); setNotice(`${item.name} 원본 PDF와 분석 기록을 삭제했습니다.`); }} />
+        {item.doc ? <HostedDocumentAnalysis name={item.name} doc={item.doc} client={client} runtime={runtime} session={session} initialRunId={item.restoreRunId} restored={item.restored} onAccepted={run => remember(item.doc!, item.name, run)} onExpired={expire} onRemoved={() => { setIntake(items => items.filter(next => next.doc?.document_id !== item.doc!.document_id)); if (session) setHistory(forgetDocumentHistory(historyStore, historyKey(session), item.doc!.document_id)); setNotice(`${item.name} 원본 PDF와 분석 기록을 삭제했습니다.`); }} />
           : <article><h3>{item.name}</h3><p role="alert" className="hosted-error">{item.error}</p></article>}
       </li>)}
     </ul>
