@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { focusClaimDetail, focusClaimRegion } from "../claims/claimFocus";
 import { elementLabels } from "../labels";
+import { SourcePageView } from "./SourcePageView";
 import { ProvisionalHold } from "../claims/ProvisionalHold";
 import { HostedApiError, holdReasonText, newIdempotencyKey, type HostedClient, type HostedResult, type ResultClaim, type ResultDecision, type ResultReview } from "./hostedClient";
 import { allowedChoices, buildResolveBody, candidateRefs, decisionLine, elementStateText, gradeSummary, openReviewFor, pageLabel, refKey, reviewStatusText, sourceQualityText, trackText, type ElementChoice } from "./resultModel";
@@ -78,6 +79,7 @@ function ClaimPanel({ claim, result, role, client, runId, onReload, detailRef, o
         })}</tbody></table></div>
         : <p className="caption">요소 태깅 전입니다. 빈 요소를 ‘근거 없음’으로 보지 않습니다.</p>}
     </div>
+    {client && runId && <SourcePageView claim={claim} result={result} client={client} runId={runId} />}
     {review && canReview(role) && client && runId && <ReviewForm key={`${review.review_id}:${review.revision}`} claim={claim} review={review} client={client} runId={runId} onReload={onReload} result={result} />}
     {review && !canReview(role) && <p className="hosted-note">이 주장은 사람 검토를 기다립니다. 이 검토는 reviewer 또는 admin 역할만 처리할 수 있습니다.</p>}
   </aside>;

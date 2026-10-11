@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { createHostedClient, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
+import { MyReports } from "./MyReports";
 import { ResultView } from "./HostedResult";
 import { forgetDocumentHistory, historyKey, readHistory, rememberHistory, runIdFromHash, validResourceId, type HistoryEntry } from "./hostedHistory";
 
@@ -101,18 +102,23 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
     let live = true; const controller = new AbortController();
     const saved = readHistory(localStorage, historyKey(session)); setHistory(saved);
     void (async () => {
-      for (const entry of saved.slice(-5)) {
-        try {
-          const doc = await client.getDocument(entry.documentId, controller.signal);
-          if (live) setIntake(items => items.some(item => (item.runId ?? item.doc?.document_id) === (entry.runId ?? entry.documentId)) ? items : [...items, { key: entry.runId ?? entry.documentId, name: entry.name, doc, runId: entry.runId, restoreRunId: entry.runId, restored: true }]);
-        } catch (err) { if (live && !controller.signal.aborted) fail(err); }
-      }
       const id = runIdFromHash(window.location.hash); if (live && id) await openRun(id);
     })();
     const changed = () => { const id = runIdFromHash(window.location.hash); if (id) void openRun(id); };
     window.addEventListener("hashchange", changed);
     return () => { live = false; controller.abort(); window.removeEventListener("hashchange", changed); };
   }, [session, client, fail, openRun]);
+  const restoreBrowserHistory = useCallback((signal: AbortSignal) => {
+    if (!session) return;
+    void (async () => {
+      for (const entry of readHistory(localStorage, historyKey(session)).slice(-5)) {
+        try {
+          const doc = await client.getDocument(entry.documentId, signal);
+          if (!signal.aborted && currentSession.current && historyKey(currentSession.current) === historyKey(session)) setIntake(items => items.some(item => (item.runId ?? item.doc?.document_id) === (entry.runId ?? entry.documentId)) ? items : [...items, { key: entry.runId ?? entry.documentId, name: entry.name, doc, runId: entry.runId, restoreRunId: entry.runId, restored: true }]);
+        } catch (err) { if (!signal.aborted) fail(err); }
+      }
+    })();
+  }, [session, client, fail]);
   function remember(doc: HostedDocument, name: string, run?: HostedRun) {
     if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
     setHistory(rememberHistory(localStorage, historyKey(session), { documentId: doc.document_id, name, runId: run?.run_id, seenAt: Date.now() }));
@@ -172,6 +178,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
     </div>
     <p className="hosted-note">여러 PDF를 선택할 수 있습니다. 각 문서의 범위를 확인하고 분석을 시작하세요. 다른 문서가 분석 중이어도 추가 업로드와 접수가 가능합니다.</p>
     {runtime?.accept_uploads === false && <p className="hosted-error">현재 업로드가 닫혀 있습니다.</p>}
+    {session && <MyReports key={historyKey(session)} client={client} onOpenRun={id => void openRun(id)} onOpenDocument={doc => { setIntake(items => items.some(item => item.doc?.document_id === doc.document_id && !item.runId) ? items : [...items, { key: doc.document_id, name: doc.display_name, doc, restored: true }]); remember(doc, doc.display_name); }} onUnavailable={restoreBrowserHistory} onFailure={fail} />}
     <details className="hosted-history"><summary>이 브라우저의 문서·분석 기록 ({history.length})</summary>
       <p className="hosted-note">같은 로그인에서 이 브라우저로 접수한 기록입니다. 다른 환경의 결과는 분석 번호나 결과 링크로 열 수 있습니다.</p>
       <ul>{history.map(entry => <li key={entry.runId ?? entry.documentId}>{entry.name}{entry.runId && <> · <a href={`#run-${entry.runId}`}>분석 {entry.runId.slice(0, 8)} 열기</a></>}</li>)}</ul>

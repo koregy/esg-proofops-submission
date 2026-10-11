@@ -16,6 +16,18 @@ export type Runtime = {
 };
 export type Session = { user_id: string; tenant_id: string | null; role: string | null; csrf_token: string; expires_at: string };
 export type HostedDocument = { document_id: string; page_count: number; size_bytes: number; expires: number; sha256: string };
+export type ListedDocument = HostedDocument & { display_name: string; uploaded_at: string };
+export type ListedRun = HostedRun & { created_at: string };
+export type CollectionPage<T> = { items: T[]; next_cursor: string | null };
+export type SourcePageManifest = {
+  run_id: string; document_id: string; document_version_id: string; physical_page: number; prepared_page: number;
+  source_sha256: string; render_source_sha256: string; prepared_sha256: string; parse_manifest_id: string; parse_manifest_sha256: string;
+  image_sha256: string; image_url: string; expires_at: string;
+  image: { width_px: number; height_px: number; dpi: number; width_pt: number; height_pt: number; rotation: number; crop_box: number[] };
+  coordinates: { units: string; origin: string; space: string; bbox_format: string; source_to_image: number[] };
+  highlights: { ref_id: string; source_id: string; verification_state: string; bbox_normalized: number[] }[];
+  unresolved_refs: { ref_id: string; reason?: string; message?: string }[]; message: string | null;
+};
 export type ReportingScopeInput = { report_year: number; period_start: string; period_end: string };
 export type ReportingScope = { report_year: number | null; period_start: string | null; period_end: string | null; origin: string; warning?: string | null; detection_status?: string };
 export type PeriodSource = { physical_page: number; quote: string; char_start: number; char_end: number; verification_state: string };
@@ -202,7 +214,7 @@ export function createHostedClient(options: ClientOptions = {}) {
     } finally { if (recovering.delete(recovery)) notifyConnection(); }
   }
 
-  async function requestOnce<T>(method: "GET" | "POST", path: string, init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<T> {
+  async function requestOnce<T>(method: "GET" | "POST", path: string, init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal; binary?: boolean } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json", ...init.headers };
     if (method !== "GET" && csrf) headers["X-CSRF-Token"] = csrf;
     let body = init.body;
@@ -221,9 +233,16 @@ export function createHostedClient(options: ClientOptions = {}) {
       throw new HostedApiError(response.status, code, Number.isFinite(retry) && retry > 0 ? retry : null, path);
     }
     if (response.status === 204) return undefined as T;
-    try { return await response.json() as T; }
+    try {
+      if (init.binary) {
+        if (response.headers.get("Content-Type")?.split(";")[0] !== "image/png") throw new HostedApiError(409, "SOURCE_IMAGE_MISMATCH", null, path);
+        return await response.blob() as T;
+      }
+      return await response.json() as T;
+    }
     catch (error) {
       if (init.signal?.aborted) throw error;
+      if (error instanceof HostedApiError) throw error;
       throw new HostedApiError(502, "INVALID_SERVER_RESPONSE", null, path);
     }
   }
@@ -244,6 +263,22 @@ export function createHostedClient(options: ClientOptions = {}) {
     },
     async logout(): Promise<void> { await request<void>("POST", "/v1/auth/logout"); csrf = ""; },
     runtime: (signal?: AbortSignal) => request<Runtime>("GET", "/v1/runtime", { signal }),
+    listDocuments: (cursor?: string | null, signal?: AbortSignal) => request<CollectionPage<ListedDocument>>("GET", `/v1/documents?${new URLSearchParams({ limit: "20", ...(cursor ? { cursor } : {}) })}`, { signal }),
+    listRuns: (cursor?: string | null, signal?: AbortSignal) => request<CollectionPage<ListedRun>>("GET", `/v1/runs?${new URLSearchParams({ limit: "20", ...(cursor ? { cursor } : {}) })}`, { signal }),
+    getSourceManifest: (runId: string, page: number, claimId: string, signal?: AbortSignal) =>
+      request<SourcePageManifest>("GET", `/v1/runs/${encodeURIComponent(runId)}/source-pages/${page}/manifest?${new URLSearchParams({ claim_id: claimId })}`, { signal }),
+    async getSourceImage(manifest: SourcePageManifest, signal?: AbortSignal): Promise<Blob> {
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      if (!uuid.test(manifest.run_id) || !uuid.test(manifest.document_version_id) || !Number.isInteger(manifest.physical_page) || manifest.physical_page < 1 || !/^[0-9a-f]{64}$/.test(manifest.image_sha256)) throw new HostedApiError(409, "SOURCE_REFERENCE_MISMATCH", null, "/source-image");
+      // Construct a same-origin route; never forward session credentials to a manifest-supplied URL.
+      const path = `/v1/runs/${manifest.run_id}/source-pages/${manifest.physical_page}/image?${new URLSearchParams({ image_sha256: manifest.image_sha256, document_version_id: manifest.document_version_id })}`;
+      const blob = await request<Blob>("GET", path, { signal, binary: true, headers: { Accept: "image/png" } });
+      const bytes = await blob.arrayBuffer();
+      const signature = new Uint8Array(bytes).slice(0, 8);
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), x => x.toString(16).padStart(2, "0")).join("");
+      if (hash !== manifest.image_sha256 || signature.join(",") !== "137,80,78,71,13,10,26,10") throw new HostedApiError(409, "SOURCE_IMAGE_MISMATCH", null, path);
+      return blob;
+    },
     getDocument: (documentId: string, signal?: AbortSignal) => request<HostedDocument>("GET", `/v1/documents/${encodeURIComponent(documentId)}`, { signal }),
     uploadDocument: (file: Blob, key = newIdempotencyKey(), signal?: AbortSignal) =>
       request<HostedDocument>("POST", "/v1/documents", { body: file, headers: { "Content-Type": "application/pdf", "Idempotency-Key": key }, signal }),

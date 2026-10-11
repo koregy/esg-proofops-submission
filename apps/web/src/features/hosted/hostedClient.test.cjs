@@ -75,3 +75,27 @@ test('a disconnected response body recovers with GET and never fabricates an emp
   assert.equal((await client.getRun('/v1/runs/existing')).status, 'completed');
   assert.equal(reads, 2);
 });
+
+
+test('PA6 collection reads encode opaque cursor and use GET without CSRF', async () => {
+  const calls = [];
+  const client = createHostedClient({ fetchImpl: async (url, init) => { calls.push({ url, ...init }); return new Response(JSON.stringify({ items: [], next_cursor: null })); } });
+  await client.listDocuments('signed+/=cursor');
+  await client.listRuns('signed+/=cursor');
+  assert.equal(new URL(calls[0].url, 'https://app.example').searchParams.get('cursor'), 'signed+/=cursor');
+  assert.equal(new URL(calls[1].url, 'https://app.example').pathname, '/hosted-api/v1/runs');
+  assert.ok(calls.every(call => call.method === 'GET' && call.credentials === 'same-origin' && !call.headers['X-CSRF-Token']));
+});
+
+test('PA6 image loads with pinned version/hash and rejects corrupt PNG bytes', async () => {
+  const bytes = new Uint8Array([137,80,78,71,13,10,26,10,1,2,3]);
+  const digest = Buffer.from(await crypto.subtle.digest('SHA-256', bytes)).toString('hex');
+  const manifest = { run_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', physical_page: 2, document_version_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', image_sha256: digest, image_url: 'https://foreign.example/leak' };
+  let url;
+  const client = createHostedClient({ fetchImpl: async path => { url = path; return new Response(bytes, { headers: { 'Content-Type': 'image/png' } }); } });
+  const image = await client.getSourceImage(manifest);
+  assert.equal(image.size, bytes.length);
+  assert.ok(url.startsWith('/hosted-api/v1/runs/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/source-pages/2/image?'));
+  assert.equal(new URL(url, 'https://app.example').searchParams.get('document_version_id'), manifest.document_version_id);
+  await assert.rejects(client.getSourceImage({ ...manifest, image_sha256: '0'.repeat(64) }), e => e.code === 'SOURCE_IMAGE_MISMATCH');
+});
