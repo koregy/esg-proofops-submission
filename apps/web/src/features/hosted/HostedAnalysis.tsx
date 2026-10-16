@@ -1,96 +1,320 @@
+import { documentName } from "./documentName";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
-import { createHostedClient, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
+import { createHostedClient, holdReasonText, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
+import { resultBrowserSummary } from "./resultModel";
+import { MyReports } from "./MyReports";
 import { ResultView } from "./HostedResult";
+import { forgetDocumentHistory, historyKey, readHistory, rememberHistory, runIdFromHash, runIdFromResultLink, validResourceId, type HistoryEntry } from "./hostedHistory";
+
+// Session-scoped history only: browser storage is disallowed (security contract);
+// re-entry after reload uses the server run list API and #run links.
+const historyMemory = new Map<string, string>();
+const historyStore = {
+  getItem: (key: string) => historyMemory.get(key) ?? null,
+  setItem: (key: string, value: string) => void historyMemory.set(key, value),
+  removeItem: (key: string) => void historyMemory.delete(key),
+};
 
 const scopeCategory: Record<string, string> = { ceo_message: "CEO 메시지", e_narrative: "환경 본문", assurance: "검증 의견서", gri_index: "GRI 색인", environmental_data: "환경 데이터", esg_data: "ESG 데이터", appendix: "부록", toc: "목차", conflict: "분류 충돌", unreadable: "판독 불가", unknown: "분류 미확인", other: "기타" };
 const scopeReason: Record<string, string> = { section_boundaries_disagree: "구역 경계가 서로 다름", native_text_missing_or_unusable: "문자층을 읽을 수 없음", navigation_is_not_claim_text: "목차는 주장 본문에서 제외", evidence_search_only: "근거 검색 전용", native_heading: "쪽 제목 기준", section_container: "구역 분류 기준", front_20_pages: "앞쪽 20쪽 범위", ceo_title: "CEO 제목 확인", claim_extraction_candidate: "주장 추출 후보", environmental_section: "환경 구역", readable_environmental_body: "읽을 수 있는 환경 본문", physical_page_heading: "실제 쪽 제목", environmental_density: "환경 내용 밀도", source_role_unresolved: "기존 구역 분류 미확인", insufficient_environmental_body_density: "환경 본문 밀도 부족", "scope_only_intro_ceo_hierarchy;original_conflict_preserved": "CEO 구역으로 제안하되 원래 분류 충돌 보존" };
-const stageLabel: Record<string, string> = { queued: "대기", parse: "문서 파싱", extract: "주장 추출", tag: "요소 태깅", result: "결과 정리" };
+const scopeStatus: Record<string, string> = { candidate_only: "자동 선택 후보", proposed: "자동 선택 제안", ready: "범위 선택 완료", selected: "선택 완료", failed: "자동 선택 실패", unknown: "분류 미확인", conflict: "분류 충돌", unreadable: "판독 불가" };
+const scopeReasonText = (reason: string) => scopeReason[reason] ?? ({ candidate_only: "자동 선택 후보", excluded_by_declared_cap: "분석 한도에 따른 제외" } as Record<string, string>)[reason] ?? "추가 분류 정보 확인 필요";
+const stageLabel: Record<string, string> = { queued: "대기", parse: "문서 읽기", extract: "주장 추출", tag: "근거 대조", result: "결과 정리" };
 const statusLabel: Record<string, string> = { queued: "대기 중", running: "분석 중", accounting_pending: "비용 정산 확인 중", partial_blocked: "보류", completed: "완료", cancelled: "취소됨", failed: "실패" };
 
 export function RuntimeOff({ runtime }: { runtime: Runtime }) {
   return <div className="hosted-notice" role="status">
-    <h3>현재 실시간 분석이 꺼져 있습니다</h3>
-    <p>서버에서 실시간 분석(OCR·모델)을 아직 열지 않았습니다. 업로드·접수는 시험 운영 중이며 {runtime.accept_new_runs ? "분석 접수는 열려 있으나 결과는 보류로 표시됩니다." : "새 분석 접수는 중지되어 있습니다."}</p>
+    <h3>실시간 분석을 일시 중지했습니다</h3>
+    <p>현재 실시간 분석 서비스가 중지되어 있습니다. {runtime.accept_new_runs ? "분석 접수는 열려 있으나 결과는 보류로 표시됩니다." : "새 분석 접수는 중지되어 있습니다."}</p>
     <p><Link className="primary-link" to="/demo">저장된 분석 사례 보기 ↗</Link></p>
   </div>;
 }
 
 export function RunOutcomeView({ run }: { run: HostedRun }) {
   const outcome = runOutcome(run);
+  const steps = ["parse", "extract", "tag", "result"];
+  const current = steps.indexOf(run.stage ?? "");
+  const progress = typeof run.progress === "number" && Number.isFinite(run.progress) ? Math.min(Math.max(run.progress, 0), 1) : null;
   return <div className={`hosted-outcome hosted-${outcome.kind}`} role="status" aria-live="polite">
-    <p className="eyebrow">분석 {run.run_id.slice(0, 8)}</p>
+    <p className="eyebrow">분석 진행</p>
     <h3>{outcome.title}<small> · {run.selected_pages.join(", ")}쪽</small></h3>
     {outcome.kind === "pending" && <>
-      <p>{statusLabel[run.status] ?? run.status}{run.stage ? ` · 단계: ${stageLabel[run.stage] ?? run.stage}` : ""}
+      <p>{statusLabel[run.status] ?? "상태 확인 중"}{run.stage ? ` · ${stageLabel[run.stage] ?? "후속 처리"}` : ""}
         {typeof run.queue_position === "number" && ` · 대기 순번 ${run.queue_position}`}
-        {typeof run.progress === "number" && ` · 진행 ${Math.round(run.progress * 100)}%`}</p>
-      {typeof run.progress === "number" && <progress max={1} value={Math.min(Math.max(run.progress, 0), 1)} aria-label="분석 진행률" />}
-      {typeof run.claims_extracted === "number" && <p>추출된 주장 {run.claims_extracted}개 · 태깅 처리 {run.claims_processed ?? 0}개</p>}
-      <p className="hosted-note">진행률은 단계 추정치이며 분석 품질이나 완료를 보증하지 않습니다.</p></>}
+        {progress !== null && ` · 진행 ${Math.round(progress * 100)}%`}</p>
+      <progress max={1} value={progress ?? undefined} aria-label="분석 진행률" />
+      <ol className="analysis-steps" aria-label="분석 단계">{steps.map((step, index) => <li key={step} className={index < current ? "done" : index === current ? "active" : ""} aria-current={index === current ? "step" : undefined}><b>{index + 1}. {stageLabel[step]}</b><span>{index < current ? "앞선 단계" : index === current ? "진행 중" : current < 0 ? "대기" : "다음 단계"}</span></li>)}</ol>
+      {typeof run.claims_extracted === "number" && <p>추출된 주장 {run.claims_extracted}건 · 근거 대조 {run.claims_processed == null ? "집계 중" : `${run.claims_processed}건`}</p>}
+      <p className="hosted-note">예상 소요 약 20–45분 · 기존 15–30쪽 분석 사례 기준이며 문서와 대기 상황에 따라 달라집니다. 진행률은 단계별 추정치입니다.</p>
+      <p className="hosted-note">이 화면에서 결과가 자동으로 열립니다. 화면을 닫아도 내 보고서에서 진행 상태를 다시 확인할 수 있습니다.</p></>}
     {outcome.reasons.map(reason => <p key={reason}>{reason}</p>)}
   </div>;
 }
 
 type Phase = "checking" | "login" | "ready";
+type Intake = { key: string; name: string; doc?: HostedDocument; error?: string; runId?: string; restoreRunId?: string; restored?: boolean };
 
 export function HostedAnalysis({ client: injected }: { client?: HostedClient }) {
   const client = useMemo(() => injected ?? createHostedClient({ base: import.meta.env.VITE_HOSTED_API_BASE || "/hosted-api" }), [injected]);
+  const [connection, setConnection] = useState("");
+  const [retryVersion, setRetryVersion] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [lookup, setLookup] = useState("");
   const [runtime, setRuntime] = useState<Runtime | null>(null);
-  const [profile, setProfile] = useState("");
   const [phase, setPhase] = useState<Phase>("checking");
   const [session, setSession] = useState<Session | null>(null);
+  const currentSession = useRef<Session | null>(session);
+  currentSession.current = session;
   const [code, setCode] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [doc, setDoc] = useState<HostedDocument | null>(null);
+  const [loginMethod, setLoginMethod] = useState<"invitation" | "password">("password");
+  const [accessRole, setAccessRole] = useState<"admin" | "organizer">("organizer");
+  const [files, setFiles] = useState<File[]>([]);
+  const [intake, setIntake] = useState<Intake[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const uploadAbort = useRef<AbortController | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const expire = useCallback(() => {
+    uploadAbort.current?.abort(); setSession(null); setIntake([]); setFiles([]); setNotice(""); setHistory([]); setPhase("login");
+    if (fileInput.current) fileInput.current.value = "";
+  }, []);
+  const fail = useCallback((err: unknown) => {
+    if (err instanceof HostedApiError) {
+      setError(err.userMessage);
+      if (err.status === 401) expire();
+    } else if (err instanceof Error) setError(err.message);
+  }, [expire]);
+
+  useEffect(() => {
+    let live = true; const controller = new AbortController();
+    const unsubscribe = client.subscribeConnection(setConnection);
+    (async () => {
+      try {
+        const rt = await client.runtime(controller.signal);
+        if (!live) return; setRuntime(rt);
+        try { const next = await client.session(controller.signal); if (live) { setSession(next); setPhase("ready"); } }
+        catch (err) { if (live && err instanceof HostedApiError && err.status === 401) setPhase("login"); else throw err; }
+      } catch (err) { if (live && !controller.signal.aborted) fail(err); }
+    })();
+    return () => { live = false; controller.abort(); unsubscribe(); uploadAbort.current?.abort(); };
+  }, [client, fail, retryVersion]);
+
+  const openRun = useCallback(async (id: string) => {
+    if (!validResourceId(id)) { setError("올바른 분석 번호를 입력해 주세요."); return; }
+    setError("");
+    try {
+      const next = await client.getRun(`/v1/runs/${id}`);
+      const document = await client.getDocument(next.document_id);
+      if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
+      const savedName = session ? readHistory(historyStore, historyKey(session)).find(entry => entry.documentId === document.document_id)?.name : undefined;
+      const name = documentName(document, savedName) ?? "분석 보고서";
+      if (session) setHistory(rememberHistory(historyStore, historyKey(session), { documentId: document.document_id, name, runId: id, seenAt: Date.now() }));
+      setIntake(items => items.some(item => item.runId === id) ? items : [...items, { key: id, name, doc: document, runId: id, restoreRunId: id, restored: true }]);
+      window.history.replaceState(null, "", `#run-${id}`);
+      requestAnimationFrame(() => {
+        const article = documentElement(id);
+        const heading = article?.querySelector<HTMLElement>('[data-testid="result-heading"]');
+        if (heading) { heading.focus({ preventScroll: true }); (heading.closest(".result-heading") ?? heading).scrollIntoView({ block: "start", behavior: "instant" }); }
+        else article?.scrollIntoView({ block: "start" });
+      });
+    } catch (err) { fail(err); }
+  }, [client, fail, session]);
+  function documentElement(id: string) { return document.getElementById(`run-${id}`); }
+  useEffect(() => {
+    if (!session) return;
+    let live = true; const controller = new AbortController();
+    const saved = readHistory(historyStore, historyKey(session)); setHistory(saved);
+    void (async () => {
+      const id = runIdFromHash(window.location.hash); if (live && id) await openRun(id);
+    })();
+    const changed = () => { const id = runIdFromHash(window.location.hash); if (id) void openRun(id); };
+    window.addEventListener("hashchange", changed);
+    return () => { live = false; controller.abort(); window.removeEventListener("hashchange", changed); };
+  }, [session, client, fail, openRun]);
+  const restoreBrowserHistory = useCallback((signal: AbortSignal) => {
+    if (!session) return;
+    void (async () => {
+      for (const entry of readHistory(historyStore, historyKey(session)).slice(-5)) {
+        try {
+          const doc = await client.getDocument(entry.documentId, signal);
+          if (!signal.aborted && currentSession.current && historyKey(currentSession.current) === historyKey(session)) setIntake(items => items.some(item => (item.runId ?? item.doc?.document_id) === (entry.runId ?? entry.documentId)) ? items : [...items, { key: entry.runId ?? entry.documentId, name: entry.name, doc, runId: entry.runId, restoreRunId: entry.runId, restored: true }]);
+        } catch (err) { if (!signal.aborted) fail(err); }
+      }
+    })();
+  }, [session, client, fail]);
+  function remember(doc: HostedDocument, name: string, run?: HostedRun) {
+    if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
+    setHistory(rememberHistory(historyStore, historyKey(session), { documentId: doc.document_id, name, runId: run?.run_id, seenAt: Date.now() }));
+    if (run && validResourceId(run.run_id)) {
+      setIntake(items => items.map(item => item.doc?.document_id === doc.document_id && !item.runId ? { ...item, runId: run.run_id } : item));
+      window.history.replaceState(null, "", `#run-${run.run_id}`);
+    }
+  }
+  async function login(event: FormEvent) {
+    event.preventDefault(); setError(""); setBusy("로그인 중");
+    try { setSession(await (loginMethod === "password" ? client.loginPassword(code, accessRole) : client.login(code))); setPhase("ready"); } catch (err) { fail(err); } finally { setCode(""); setBusy(""); }
+  }
+  async function upload() {
+    const controller = new AbortController(); uploadAbort.current = controller;
+    setError(""); setBusy("업로드 중");
+    for (const file of files) {
+      if (controller.signal.aborted) break;
+      const key = crypto.randomUUID();
+      try {
+        if (new TextDecoder().decode(await file.slice(0, 4).arrayBuffer()) !== "%PDF") throw new Error("PDF 파일을 선택해 주세요.");
+        if (runtime && file.size > runtime.limits.max_upload_bytes) throw new Error(`PDF가 ${Math.floor(runtime.limits.max_upload_bytes / 1048576)} MiB를 넘습니다.`);
+        const doc = await client.uploadDocument(file, undefined, controller.signal);
+        if (!controller.signal.aborted) { setIntake(items => [...items, { key, name: documentName(doc, file.name) ?? "분석 보고서", doc }]); remember(doc, documentName(doc, file.name) ?? "분석 보고서"); }
+      } catch (err) {
+        if (controller.signal.aborted) break;
+        if (err instanceof HostedApiError && err.status === 401) { fail(err); break; }
+        const message = err instanceof HostedApiError ? err.userMessage : err instanceof Error ? err.message : "업로드 실패";
+        setIntake(items => [...items, { key, name: file.name, error: message }]);
+      }
+    }
+    setFiles([]); if (fileInput.current) fileInput.current.value = ""; setBusy("");
+  }
+  async function logout() {
+    uploadAbort.current?.abort();
+    try { await client.logout(); } catch { /* session may already be gone */ }
+    expire(); setFiles([]); setError("");
+  }
+  function loginForm() {
+    return <form className="hosted-login hosted-panel" onSubmit={login}>
+      <div className="hosted-section-heading"><div><p className="eyebrow">접속</p><h3>초대 코드 또는 접근 비밀번호</h3></div></div>
+      <div className="hosted-form-row hosted-login-methods">
+        <label>로그인 방식<select value={loginMethod} onChange={event => { setLoginMethod(event.target.value as "invitation" | "password"); setCode(""); setError(""); }} disabled={!!busy}>
+          <option value="password">접근 비밀번호 (재사용)</option><option value="invitation">초대 코드 (1회용)</option>
+        </select></label>
+        {loginMethod === "password" && <label>접근 계정<select value={accessRole} onChange={event => { setAccessRole(event.target.value as "admin" | "organizer"); setCode(""); }} disabled={!!busy}>
+          <option value="organizer">대회측</option><option value="admin">관리자</option>
+        </select></label>}
+      </div>
+      <div className="hosted-form-row">
+      <label>초대 코드 또는 접근 비밀번호<input type="password" autoComplete={loginMethod === "password" ? "current-password" : "off"} value={code} onChange={event => setCode(event.target.value)} required minLength={loginMethod === "password" ? 16 : 32} maxLength={128} disabled={!!busy} /></label>
+      <button className="hosted-primary" type="submit" disabled={!!busy}>입장</button>
+      </div>
+      <p className="hosted-note">10분 동안 5회 로그인에 실패하면 15분 동안 잠깁니다. 대회측 계정은 본인이 올린 보고서와 분석 결과만 볼 수 있습니다.</p>
+    </form>;
+  }
+  let body: ReactNode;
+  if (phase === "checking") body = <><p role="status">분석 서비스 연결 중…</p>{error && <button type="button" onClick={() => { setError(""); setRetryVersion(value => value + 1); }}>연결 다시 시도</button>}</>;
+  else if (phase === "login") body = <>
+    {runtime && !runtime.live_analysis && <RuntimeOff runtime={runtime} />}
+    {loginForm()}
+  </>;
+  else body = <>
+    {runtime && !runtime.live_analysis && <RuntimeOff runtime={runtime} />}
+    <section className="hosted-panel hosted-upload-panel" aria-label="PDF 업로드">
+    <div className="hosted-section-heading"><div><p className="eyebrow">새 분석</p><h3>보고서 업로드</h3></div></div>
+    {runtime && <p className="hosted-notice-text" data-testid="upload-notice">{runtime.upload_notice}</p>}
+    {runtime && <p className="hosted-note">업로드 한도: {Math.floor(runtime.limits.max_upload_bytes / 1048576)} MiB · {runtime.limits.max_pdf_pages}쪽 이하 PDF.</p>}
+    <div className="hosted-upload hosted-form-row">
+      <label>PDF 보고서<input ref={fileInput} type="file" accept=".pdf,application/pdf" multiple disabled={!!busy} onChange={event => setFiles(Array.from(event.target.files ?? []))} /></label>
+      <button className="hosted-primary" type="button" disabled={!files.length || !!busy || runtime?.accept_uploads === false} onClick={() => void upload()}>업로드</button>
+    </div>
+    <p className="hosted-note">여러 PDF를 선택할 수 있습니다. 각 문서의 범위를 확인하고 분석을 시작하세요. 다른 문서가 분석 중이어도 추가 업로드와 접수가 가능합니다.</p>
+    {runtime?.accept_uploads === false && <p className="hosted-error">현재 업로드가 닫혀 있습니다.</p>}
+    </section>
+    {session && <MyReports key={historyKey(session)} client={client} onOpenRun={id => void openRun(id)} onOpenDocument={doc => { setIntake(items => items.some(item => item.doc?.document_id === doc.document_id && !item.runId) ? items : [...items, { key: doc.document_id, name: documentName(doc) ?? "분석 보고서", doc, restored: true }]); remember(doc, documentName(doc) ?? "분석 보고서"); }} onUnavailable={restoreBrowserHistory} onFailure={fail} />}
+    <div className="hosted-reopen hosted-panel">
+    <details className="hosted-history"><summary>현재 탭의 문서·분석 기록 ({history.length})</summary>
+      <p className="hosted-note">현재 탭에서 같은 로그인으로 연 기록입니다. 새로고침하면 이 기록은 지워집니다. 내 보고서·실행 목록이나 분석 번호, 결과 링크로 다시 열 수 있습니다.</p>
+      <ul>{history.map(entry => <li key={entry.runId ?? entry.documentId}>{entry.name}{entry.runId && <> · <a href={`#run-${entry.runId}`}>분석 {entry.runId.slice(0, 8)} 열기</a></>}</li>)}</ul>
+    </details>
+    <form className="hosted-lookup hosted-form-row" onSubmit={event => { event.preventDefault(); const id = runIdFromResultLink(lookup); if (id) void openRun(id); else setError("올바른 분석 번호 또는 결과 링크를 입력해 주세요."); }}>
+      <label>기존 분석 번호 또는 결과 링크<input value={lookup} onChange={event => setLookup(event.target.value)} placeholder="결과 링크의 분석 번호" /></label>
+      <button className="hosted-secondary" type="submit">기존 결과 열기</button>
+    </form>
+    </div>
+    <ul className="hosted-documents" aria-label="문서별 분석 상태">
+      {intake.map(item => <li key={item.key}>
+        {item.doc ? <HostedDocumentAnalysis name={item.name} doc={item.doc} client={client} runtime={runtime} session={session} initialRunId={item.restoreRunId} restored={item.restored} onAccepted={run => remember(item.doc!, item.name, run)} onExpired={expire} onRemoved={() => { setIntake(items => items.filter(next => next.doc?.document_id !== item.doc!.document_id)); if (session) setHistory(forgetDocumentHistory(historyStore, historyKey(session), item.doc!.document_id)); setNotice(`${item.name} 원본 PDF와 분석 기록을 삭제했습니다.`); }} />
+          : <article><h3>{item.name}</h3><p role="alert" className="hosted-error">{item.error}</p></article>}
+      </li>)}
+    </ul>
+  </>;
+  return <section className="surface live-report hosted-analysis" aria-label="호스팅 분석">
+    <header className="hosted-heading">
+    <p className="eyebrow">보고서 근거 점검</p><h2>ESG 보고서 근거 분석</h2>
+    <p>PDF를 올리고 분석 범위를 선택하면 주장과 원문 근거를 연결합니다. 결과는 확정·잠정·보류로 안내합니다.</p>
+    {session && <p className="hosted-session">로그인됨 · {session.role === "admin" ? "관리자" : session.role === "reviewer" ? "검토자" : session.role === "organizer" ? "대회측" : "사용자"} <button className="hosted-text-button" type="button" onClick={() => void logout()}>로그아웃</button></p>}
+    </header>
+    {Object.values(runtime?.provider_limits ?? {}).some(limit => limit.status === "blocked") && <p className="hosted-error" role="alert">{providerLimitMessage}</p>}
+    {connection && <p className="hosted-notice" role="status" aria-live="polite">{connection}</p>}
+    {body}
+    {notice && <p role="status">{notice}</p>}
+    {busy && <p role="status">{busy}…</p>}
+    {error && <p className="hosted-error" role="alert">{error}</p>}
+  </section>;
+}
+
+function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRunId, restored, onAccepted, onExpired, onRemoved }: {
+  name: string; doc: HostedDocument; client: HostedClient; runtime: Runtime | null; session: Session | null; initialRunId?: string; restored?: boolean; onAccepted: (run: HostedRun) => void; onExpired: () => void; onRemoved: () => void;
+}) {
+  const [profile, setProfile] = useState(runtime?.pipeline_profile ?? "unattended-v1");
   const [pages, setPages] = useState("");
   const [evidencePages, setEvidencePages] = useState("");
+  const [reportYear, setReportYear] = useState("");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [scope, setScope] = useState<ScopePlan | null>(null);
   const [run, setRun] = useState<HostedRun | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [scopeConflict, setScopeConflict] = useState(false);
-  const [deleted, setDeleted] = useState(false);
   const [result, setResult] = useState<HostedResult | null>(null);
   const abort = useRef<AbortController | null>(null);
+  const resultRegion = useRef<HTMLDivElement | null>(null);
+  const focusedRun = useRef<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const fail = useCallback((err: unknown) => {
     if (err instanceof HostedApiError) {
       setError(err.userMessage);
       if (err.code === "SCOPE_CONFLICT") setScopeConflict(true);
-      if (err.status === 401) { setPhase("login"); setSession(null); }
+      if (err.status === 401) onExpired();
     } else if (err instanceof Error) setError(err.message);
-  }, []);
+  }, [onExpired]);
 
   useEffect(() => {
-    let live = true;
-    (async () => {
+    let live = true; const controller = new AbortController(); abort.current = controller;
+    setBusy("범위 계획 불러오는 중");
+    void (async () => {
       try {
-        const rt = await client.runtime();
-        if (!live) return; setRuntime(rt); setProfile(rt.pipeline_profile ?? "unattended-v1");
-        try { const s = await client.session(); if (!live) return; setSession(s); setPhase("ready"); }
-        catch (err) { if (live && err instanceof HostedApiError && err.status === 401) setPhase("login"); else throw err; }
-      } catch (err) { if (live) { fail(err); setPhase("login"); } }
+        if (initialRunId) {
+          setBusy("");
+          const first = await client.getRun(`/v1/runs/${initialRunId}`, controller.signal);
+          if (!live) return;
+          const finished = await client.pollRun(first, next => { if (live) setRun(next); }, controller.signal);
+          if (live && !controller.signal.aborted) await showResult(finished, controller.signal);
+        } else {
+          const next = restored ? await client.getScopePlan(doc.document_id, controller.signal) : await client.scopePlan(doc.document_id);
+          if (live) applyScope(next);
+        }
+      } catch (err) { if (live && !controller.signal.aborted) fail(err); }
+      finally { if (live) setBusy(""); }
     })();
-    return () => { live = false; abort.current?.abort(); };
-  }, [client, fail]);
+    return () => { live = false; controller.abort(); };
+  }, [client, doc.document_id, fail, initialRunId, restored]);
 
-  async function login(event: FormEvent) {
-    event.preventDefault(); setError(""); setBusy("로그인 중");
-    try { setSession(await client.login(code)); setCode(""); setPhase("ready"); } catch (err) { fail(err); } finally { setBusy(""); }
-  }
-  async function upload() {
-    if (!file) return; setError(""); setBusy("업로드 중"); setDoc(null); setScope(null); setRun(null); setResult(null); setDeleted(false);
-    try {
-      if (new TextDecoder().decode(await file.slice(0, 4).arrayBuffer()) !== "%PDF") throw new Error("PDF 파일을 선택해 주세요.");
-      if (runtime && file.size > runtime.limits.max_upload_bytes) throw new Error(`PDF가 ${Math.floor(runtime.limits.max_upload_bytes / 1048576)} MiB를 넘습니다.`);
-      const uploaded = await client.uploadDocument(file);
-      setDoc(uploaded); setBusy("무료 자동 범위 계획 생성 중");
-      applyScope(await client.scopePlan(uploaded.document_id));
-    } catch (err) { fail(err); } finally { setBusy(""); }
-  }
+  useEffect(() => {
+    if (!result || !run || focusedRun.current === run.run_id) return;
+    const heading = resultRegion.current?.querySelector<HTMLElement>('[data-testid="result-heading"]');
+    if (heading) {
+      focusedRun.current = run.run_id;
+      heading.focus({ preventScroll: true });
+      (heading.closest(".result-heading") ?? heading).scrollIntoView({ block: "start", behavior: "instant" });
+    }
+  }, [!!result, run?.run_id]);
+
   function applyScope(next: ScopePlan) {
     setScope(next); setScopeConflict(false);
+    setReportYear(String(next.reporting_scope?.report_year ?? ""));
+    setPeriodStart(next.reporting_scope?.period_start ?? "");
+    setPeriodEnd(next.reporting_scope?.period_end ?? "");
     const fallback = next.plan.status === "failed" && !next.selection ? next.plan.suggested_front_pages ?? [] : [];
     setPages((next.plan.selected_claim_pages.length ? next.plan.selected_claim_pages : fallback.slice(0, 10)).join(","));
     setEvidencePages((next.plan.selected_evidence_pages.length ? next.plan.selected_evidence_pages : fallback.slice(0, 30)).join(","));
@@ -100,123 +324,143 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
     setError(""); setBusy("최신 계획 불러오는 중");
     try { applyScope(await client.getScopePlan(doc.document_id)); } catch (err) { fail(err); } finally { setBusy(""); }
   }
+  function editedPeriod() {
+    if (!scope?.reporting_scope && !reportYear && !periodStart && !periodEnd) return undefined;
+    if (!/^\d{4}$/.test(reportYear) || !periodStart || !periodEnd || periodStart > periodEnd) throw new Error("보고연도와 보고기간 시작·종료일을 확인해 주세요.");
+    return { report_year: Number(reportYear), period_start: periodStart, period_end: periodEnd };
+  }
+  function periodChanged() {
+    return reportYear !== String(scope?.reporting_scope?.report_year ?? "") || periodStart !== (scope?.reporting_scope?.period_start ?? "") || periodEnd !== (scope?.reporting_scope?.period_end ?? "");
+  }
   async function saveScope() {
     if (!doc || !scope) return;
     setError(""); setBusy("범위 저장 중");
     try {
       applyScope(await client.editScope(doc.document_id, scope,
-        parsePageSelection(pages, doc.page_count, 10), parsePageSelection(evidencePages, doc.page_count, 30)));
+        parsePageSelection(pages, doc.page_count, 10), parsePageSelection(evidencePages, doc.page_count, 30), periodChanged() ? editedPeriod() : undefined));
     } catch (err) { fail(err); } finally { setBusy(""); }
   }
   async function start() {
     if (!doc || !scope) return;
     setError(""); setBusy("접수 중");
+    abort.current?.abort();
     const controller = new AbortController(); abort.current = controller;
     try {
       const claims = parsePageSelection(pages, doc.page_count, 10);
       const evidence = parsePageSelection(evidencePages, doc.page_count, 30);
-      const changed = !scope.selection || claims.join(",") !== scope.plan.selected_claim_pages.join(",") || evidence.join(",") !== scope.plan.selected_evidence_pages.join(",");
-      const current = changed ? await client.editScope(doc.document_id, scope, claims, evidence) : scope;
+      const period = periodChanged() ? editedPeriod() : undefined;
+      const changed = periodChanged() || !scope.selection || claims.join(",") !== scope.plan.selected_claim_pages.join(",") || evidence.join(",") !== scope.plan.selected_evidence_pages.join(",");
+      const current = changed ? await client.editScope(doc.document_id, scope, claims, evidence, period) : scope;
+      if (controller.signal.aborted) return;
       applyScope(current);
       const accepted = await client.createRun(doc.document_id, current, undefined, profile);
-      setBusy("분석 진행");
-      const finished = await client.pollRun(accepted, setRun, controller.signal);
-      await showResult(finished);
-    } catch (err) { fail(err); } finally { setBusy(""); }
+      if (controller.signal.aborted) return;
+      setRun(accepted); setResult(null); setBusy(""); onAccepted(accepted);
+      const finished = await client.pollRun(accepted, next => { if (!controller.signal.aborted) setRun(next); }, controller.signal);
+      if (!controller.signal.aborted) await showResult(finished, controller.signal);
+    } catch (err) { if (!controller.signal.aborted) fail(err); }
+    finally { if (abort.current === controller) setBusy(current => current === "접수 중" ? "" : current); }
   }
-  async function showResult(finished: HostedRun) {
+  async function showResult(finished: HostedRun, signal: AbortSignal) {
     if (finished.status !== "partial_blocked" && finished.status !== "completed") return;
-    if (finished.result) { setResult(finished.result); return; }
-    if (finished.result_url) setResult(await client.getResult(finished.result_url));
+    if (finished.result_url) {
+      const next = await client.getResult(finished.result_url, signal);
+      if (!signal.aborted) setResult(next);
+    } else if (finished.result) setResult(finished.result);
   }
   async function reloadResult() {
     setError("");
     try { if (run?.result_url) setResult(await client.getResult(run.result_url)); } catch (err) { fail(err); }
   }
   async function cancel() {
-    if (!run) return; setError("");
-    try { abort.current?.abort(); setRun(await client.cancelRun(run.run_id)); } catch (err) { fail(err); }
+    if (!run) return; setError(""); setBusy("취소 중");
+    try { const cancelled = await client.cancelRun(run.run_id); abort.current?.abort(); setRun(cancelled); } catch (err) { fail(err); }
+    finally { setBusy(""); }
   }
   async function remove() {
     if (!doc || !window.confirm("업로드한 원본 PDF와 분석 기록을 삭제합니다. 계속할까요?")) return;
     setError(""); setBusy("삭제 중");
     try {
-      abort.current?.abort();
       const deletion = await client.deleteDocument(doc.document_id);
       if (deletion.status !== "completed") throw new Error("삭제가 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
-      setDoc(null); setRun(null); setResult(null); setFile(null); setDeleted(true);
+      abort.current?.abort(); onRemoved();
     } catch (err) {
-      if (err instanceof HostedApiError && err.status === 403) setError("삭제 권한이 없습니다. 본인이 올린 문서이거나 테넌트 관리자(admin)여야 삭제할 수 있습니다.");
+      if (err instanceof HostedApiError && err.status === 403) setError("삭제 권한이 없습니다. 본인이 올린 문서이거나 작업 공간 관리자여야 삭제할 수 있습니다.");
       else fail(err);
     } finally { setBusy(""); }
   }
-  async function logout() {
-    try { await client.logout(); } catch { /* session may already be gone */ }
-    setSession(null); setDoc(null); setRun(null); setPhase("login");
+  async function copyResultLink() {
+    if (!run || !validResourceId(run.run_id)) return;
+    try {
+      await navigator.clipboard.writeText(new URL(`/runs/${run.run_id}/result`, window.location.origin).href);
+      setLinkCopied(true);
+    } catch { setError("결과 링크를 복사하지 못했습니다. 브라우저의 복사 권한을 확인해 주세요."); }
   }
-
+  const stageSeconds = result ? resultBrowserSummary(result).stageSeconds : null;
+  const IntakeSurface = result ? "details" : "div";
   const running = !!run && !terminalStatuses.includes(run.status);
   const providerBlocked = Object.values(runtime?.provider_limits ?? {}).some(limit => limit.status === "blocked")
     || (!!run?.error_code && providerLimitCodes.includes(run.error_code));
-  let body: ReactNode;
-  if (phase === "checking") body = <p role="status">서버 상태 확인 중…</p>;
-  else if (runtime && !runtime.live_analysis && phase === "login" && !session) body = <>
-    <RuntimeOff runtime={runtime} />
-    <p className="hosted-note">그래도 접수·보류 흐름을 시험하려면 초대 코드로 로그인하세요.</p>{loginForm()}</>;
-  else if (phase === "login") body = loginForm();
-  else body = <>
-    {runtime && !runtime.live_analysis && <RuntimeOff runtime={runtime} />}
-    {runtime && <p className="hosted-notice-text" data-testid="upload-notice">{runtime.upload_notice}</p>}
-    {runtime && <p className="hosted-note">업로드 한도: {Math.floor(runtime.limits.max_upload_bytes / 1048576)} MiB · {runtime.limits.max_pdf_pages}쪽 이하 PDF.</p>}
-    <div className="hosted-upload">
-      <label>PDF 보고서<input type="file" accept=".pdf,application/pdf" disabled={!!busy || running} onChange={event => { setFile(event.target.files?.[0] ?? null); setDoc(null); setScope(null); setRun(null); setResult(null); setDeleted(false); }} /></label>
-      <button type="button" disabled={!file || !!busy || running || runtime?.accept_uploads === false} onClick={() => void upload()}>업로드</button>
-    </div>
-    {runtime?.accept_uploads === false && <p className="hosted-error">현재 업로드가 닫혀 있습니다.</p>}
-    {deleted && <p role="status">원본 PDF와 분석 기록을 삭제했습니다.</p>}
-    {doc && <div className="hosted-pages">
+  return <article className="hosted-document" data-testid="document-analysis" id={run ? `run-${run.run_id}` : undefined}>
+    <IntakeSurface className={result ? "hosted-panel hosted-run-summary" : "hosted-intake"}>
+    {result && <summary><span className="hosted-summary-name">실행 요약 · {name}</span><span>범위 {run?.selected_pages.length ?? 0}쪽 · {statusLabel[run?.status ?? ""] ?? "상태 미확인"}{stageSeconds !== null ? ` · 처리 시간 ${Math.round(stageSeconds)}초 (단계 합계·대기 제외)` : ""}</span></summary>}
+    <div className="hosted-section-heading">{!result && <h3>{name}</h3>}
+    <p className="hosted-state" data-status={run?.status} role="status" data-testid="document-status">{run ? `${statusLabel[run.status] ?? run.status}${run.status === "queued" && run.queue_position ? ` · 대기 ${run.queue_position}번째` : run.status === "running" && run.stage ? ` · ${stageLabel[run.stage] ?? run.stage}` : ""}` : scope ? "분석 접수 가능" : "범위 계획 준비 중"}</p></div>
+    {result && run && validResourceId(run.run_id) && <button className="hosted-secondary" type="button" onClick={() => void copyResultLink()}>{linkCopied ? "결과 링크 복사됨" : "결과 링크 복사"}</button>}
+    <p className="hosted-note">{scope ? `선택 요약: 주장 ${scope.plan.selected_claim_pages.length}쪽 · 근거 검색 ${scope.plan.selected_evidence_pages.length}쪽` : run ? `접수한 선택 범위 ${run.selected_pages.length}쪽` : "분석 범위를 준비하고 있습니다."}</p>
+    {!result && runtime?.accept_new_runs === false && <p className="hosted-error">현재 새 분석 접수가 중지되어 있습니다.</p>}
+    <details className="hosted-scope" open={!run}><summary>분석 범위와 보고기간</summary><div className="hosted-pages">
       <p>업로드 완료 · 총 {doc.page_count}쪽. 자동 선택: 주장 최대 10쪽 · 근거 검색 최대 30쪽(주장 포함). 수정하지 않으면 이 범위로 진행합니다.</p>
       {!scope && <button type="button" disabled={!!busy} onClick={() => { setBusy("자동 범위 계획 생성 중"); void client.scopePlan(doc.document_id).then(applyScope).catch(fail).finally(() => setBusy("")); }}>자동 범위 계획 생성</button>}
       {scope && <>
-        <p>계획 상태: {scope.plan.status} · 선택 범위만 분석하며 원문 확인 필요 항목은 잠정 결과로 표시합니다.</p>
-        {scope.plan.failure_reasons.map(reason => <p role="alert" key={reason}>자동 범위 선택 실패: {reason}</p>)}
+        <p>계획 상태: {scopeStatus[scope.plan.status] ?? "범위 확인 필요"} · 선택 범위만 분석하며 원문 확인 필요 항목은 잠정 결과로 표시합니다.</p>
+        <fieldset className="hosted-period" disabled={!!busy || running}>
+          <legend>문서 보고기간</legend>
+          <p>{scope.reporting_scope?.origin === "detected" ? "원문에서 감지" : scope.reporting_scope?.origin === "manual" ? "사람이 수정한 기간" : "기본 보고기간"} · {scope.reporting_scope?.report_year ?? "입력 필요"}년 ({scope.reporting_scope?.period_start ?? "미확인"} ~ {scope.reporting_scope?.period_end ?? "미확인"})</p>
+          {scope.reporting_scope?.warning && <p role="status">{scope.reporting_scope.warning}</p>}
+          <label>보고연도<input aria-label="보고연도" type="number" min="1900" max="2100" value={reportYear} onChange={event => setReportYear(event.target.value)} /></label>
+          <label>보고기간 시작<input aria-label="보고기간 시작" type="date" value={periodStart} onChange={event => setPeriodStart(event.target.value)} /></label>
+          <label>보고기간 종료<input aria-label="보고기간 종료" type="date" value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} /></label>
+          <details><summary>보고기간 원문과 예외</summary>
+            {scope.plan.reporting_period_detection?.candidates.map((candidate, i) => <p key={`candidate-${i}`}>{candidate.source_ref.physical_page}쪽 · {candidate.source_ref.quote}</p>)}
+            {scope.plan.reporting_period_detection?.exceptions.map((exception, i) => <p key={`exception-${i}`}>예외 · {exception.source_ref.physical_page}쪽 · {exception.source_ref.quote}</p>)}
+            <p className="hosted-note">예외 문장으로 중심 보고기간을 넓히지 않습니다. 보고기간 설정은 주장·수치·목표연도의 근거 검증을 대신하지 않습니다.</p>
+          </details>
+        </fieldset>
+        {scope.plan.failure_reasons.map(reason => <p role="alert" key={reason}>자동 범위 선택 실패: {scopeReasonText(reason)}</p>)}
         {scope.plan.status === "failed" && <p className="hosted-note">앞쪽 제안 쪽을 기본값으로 넣었습니다. 원본을 확인하고 수동 범위를 지정하세요. 자동 분류 실패·판독 불명확 상태는 유지되며 근거 검증을 대신하지 않습니다.</p>}
         {scopeConflict && <button type="button" disabled={!!busy || running} onClick={() => void reloadScope()}>최신 계획 다시 불러오기</button>}
+        <div className="hosted-selection">
         <label>주장 쪽 번호<input value={pages} onChange={event => setPages(event.target.value)} disabled={!!busy || running} aria-label="주장 쪽 번호" /></label>
         <label>근거 검색 쪽 번호<input value={evidencePages} onChange={event => setEvidencePages(event.target.value)} disabled={!!busy || running} aria-label="근거 검색 쪽 번호" /></label>
-        <button type="button" disabled={!!busy || running || scopeConflict} onClick={() => void saveScope()}>범위 수정 저장</button>
-        <details open><summary>쪽별 분류와 선택 이유</summary><table><thead><tr><th>원본 쪽</th><th>분류</th><th>선택</th><th>이유</th></tr></thead><tbody>{scope.plan.pages.map(page => <tr key={page.page}><td>{page.page}</td><td>{scopeCategory[page.category] ?? page.category}</td><td>{scope.plan.selected_claim_pages.includes(page.page) ? "주장·근거" : scope.plan.selected_evidence_pages.includes(page.page) ? "근거 전용" : "제외"}</td><td>{page.reasons.map(reason => scopeReason[reason] ?? reason).join(" · ")}</td></tr>)}</tbody></table></details>
+        <button className="hosted-secondary" type="button" disabled={!!busy || running || scopeConflict} onClick={() => void saveScope()}>범위 수정 저장</button>
+        </div>
+        <details><summary>쪽별 분류와 선택 이유</summary><table className="hosted-scope-table"><thead><tr><th>원본 쪽</th><th>분류</th><th>선택</th><th>이유</th></tr></thead><tbody>{scope.plan.pages.map(page => <tr key={page.page}><td>{page.page}</td><td>{scopeCategory[page.category] ?? page.category}</td><td>{scope.plan.selected_claim_pages.includes(page.page) ? "주장·근거" : scope.plan.selected_evidence_pages.includes(page.page) ? "근거 전용" : "제외"}</td><td>{page.reasons.map(reason => scopeReasonText(reason)).join(" · ")}</td></tr>)}</tbody></table></details>
       </>}
-      <label>분석 프로필<select aria-label="분석 프로필" value={profile} onChange={event => setProfile(event.target.value)} disabled={!!busy || running}>
-        {!profile.startsWith("finals-unattended-") && <option value={profile}>기존 프로필</option>}
-        <option value="finals-unattended-v1">v1 · 단계 중첩</option>
-        <option value="finals-unattended-v2">v2 · 원문 대조 후 태깅</option>
+      <label>분석 방식<select aria-label="분석 방식" value={profile} onChange={event => setProfile(event.target.value)} disabled={!!busy || running}>
+        {!profile.startsWith("finals-unattended-") && <option value={profile}>기본 분석</option>}
+        <option value="finals-unattended-v1">단계 병행 처리</option>
+        <option value="finals-unattended-v2">원문 확인 우선</option>
       </select></label>
-      <p className="hosted-note">v2 기본값은 잠정 설정이며 QI2 검토 이후 확정합니다.</p>
-      <button type="button" disabled={!!busy || running || !scope || scopeConflict || providerBlocked || runtime?.accept_new_runs === false} onClick={() => void start()}>분석 시작</button>
-      {runtime?.accept_new_runs === false && <p className="hosted-error">현재 새 분석 접수가 중지되어 있습니다.</p>}
+      <p className="hosted-note">선택한 범위의 원문 근거를 점검합니다. 원문 확인이 끝나지 않은 문장은 판정 보류로 표시합니다.</p>
+
+    </div></details>
+    {!result && run?.status !== "completed" && run?.status !== "partial_blocked" && <div className="hosted-start-row">
+    <p className="hosted-note">분석 비용 한도: 실행당 USD 1.0 · 일·행사 USD 7</p>
+    <button className="hosted-primary" type="button" disabled={!!busy || running || !scope || scopeConflict || providerBlocked || runtime?.accept_new_runs === false} onClick={() => void start()}>분석 시작</button>
     </div>}
-    {run && <RunOutcomeView run={run} />}
-    {result && run && <ResultView result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} />}
-    {running && <button type="button" onClick={() => void cancel()}>분석 취소</button>}
-    {doc && <p className="hosted-note">업로드한 PDF는 올린 본인 또는 테넌트 관리자(admin)가 삭제할 수 있습니다. 삭제하면 원본과 분석 기록이 함께 지워집니다.</p>}
-    {doc && <button type="button" className="hosted-danger" disabled={!!busy && busy !== "분석 진행"} onClick={() => void remove()}>업로드한 PDF 삭제</button>}
-  </>;
+    {run && <RunOutcomeView run={result ? { ...run, result } : run} />}
+    {run?.error_code && <p className="hosted-error">{holdReasonText(run.provider_error_code ?? run.error_code)}</p>}
+    </IntakeSurface>
+    {result && run && <div ref={resultRegion} className="hosted-result-region"><ResultView reportName={documentName(doc, name)} companyName={doc.company_name} pageCount={doc.page_count} selectedPages={run.selected_pages} runStatus={run.status} result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} /></div>}
+    {running && <button className="hosted-secondary" type="button" disabled={!!busy} onClick={() => void cancel()}>분석 취소</button>}
+    <div className="hosted-document-footer">
+    {doc && <p className="hosted-note">업로드한 PDF는 올린 본인 또는 작업 공간 관리자가 삭제할 수 있습니다. 삭제하면 원본과 분석 기록이 함께 지워집니다.</p>}
+    {doc && <button type="button" className="hosted-danger" disabled={!!busy} onClick={() => void remove()}>업로드한 PDF 삭제</button>}
+    </div>
 
-  function loginForm() {
-    return <form className="hosted-login" onSubmit={login}>
-      <label>초대 코드<input type="password" autoComplete="off" value={code} onChange={event => setCode(event.target.value)} required minLength={32} /></label>
-      <button disabled={!!busy || !code.trim()}>로그인</button>
-    </form>;
-  }
-
-  return <section className="surface live-report hosted-analysis" aria-label="호스팅 분석">
-    <p className="eyebrow">HOSTED ANALYSIS</p><h2>무인 보고서 분석 (초대 코드)</h2>
-    <p>실행 비용 상한 USD 1.0 · 일·행사 USD 7. 사람 검토 없이 처리하되 등급은 잠정·미확정으로 구분합니다.</p>
-    {session && <p className="hosted-session">로그인됨 · {session.role ?? "역할 없음"} <button type="button" onClick={() => void logout()}>로그아웃</button></p>}
-    {providerBlocked && !run && <p className="hosted-error" role="alert">{providerLimitMessage}</p>}
-    {body}
     {busy && <p role="status">{busy}…</p>}
     {error && <p className="hosted-error" role="alert">{error}</p>}
-  </section>;
+    {providerBlocked && <p className="hosted-error">{providerLimitMessage}</p>}
+  </article>;
 }

@@ -1,3 +1,4 @@
+import { runIdFromResultPath } from "./features/hosted/hostedHistory";
 import { StaticDemo } from "./StaticDemo";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
@@ -32,7 +33,7 @@ export function App() {
 function SessionApp() {
   const navigate = useNavigate();
   const location = useLocation();
-  const publicPage = location.pathname === "/" || ["/demo", "/analyze", "/review", "/report", "/live"].some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const publicPage = !!runIdFromResultPath(location.pathname) || location.pathname === "/" || ["/demo", "/analyze", "/review", "/report", "/live"].some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
   const [staticMode, setStaticMode] = useState(import.meta.env.VITE_DEMO_STATIC === "true");
   const [session, setSession] = useState<Session | null>(null);
   const [sessionStatus, setSessionStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");

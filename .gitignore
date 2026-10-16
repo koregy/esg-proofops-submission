@@ -42,3 +42,20 @@ outputs/handoff-packages/
 *.key
 .vercel
 .env*
+
+# Generated from the pinned pdfjs-dist package for build/dev.
+apps/web/public/pdfjs/
+.playwright-cli/
+
+# HO1: private operations, raw evaluation and source corpora stay local.
+/outputs/
+/lab/
+/handoff/
+/.kiro/
+/.playwright-cli/
+/runtime.env
+**/runtime.env
+*.p12
+/apps/web/test/fixtures/w12/kakao.result.json
+/apps/web/test/fixtures/w12/lg.result.json
+/docs/R00_DOMAIN_DECISIONS.md

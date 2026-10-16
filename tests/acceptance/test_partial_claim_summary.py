@@ -16,14 +16,15 @@ import {PartialClaimSummary} from CLAIMS;
 import assert from 'node:assert/strict';
 const ref={source_id:'s',page_num:48,quote:'재생에너지 <b>조달</b> 확대',
 verification_state:'verified'};
-const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',evidence_refs:[]},
+const yearRef={...ref,source_id:'year',quote:'2040년까지 탄소중립',page_num:47};
+const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',evidence_refs:[yearRef]},
  {element_id:'G6',state:'unknown',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G4',state:'conflict',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G3',state:'unknown',normalized_value:null,evidence_refs:[]}];
 const render=(decision,projection=null,items=elements)=>renderToStaticMarkup(
  React.createElement(PartialClaimSummary,
  {decision,projection,elements:items,rawCandidates:[],onSourceOpen:()=>{}}));
-for(const decision of [null,{decision_status:'not_run',missing_elements:[]}]) {
+for(const decision of [null,{decision_status:'not_run',missing_elements:[],gap_ids:[]}]) {
  const html=render(decision);
  for(const text of ['검토 중인 내용','2040년','G6','G4','원문 48쪽','검토 후보','&lt;b&gt;'])
  assert.ok(html.includes(text),text);
@@ -36,7 +37,10 @@ blocked_action:'판정기준 승인이 필요합니다.'});
 assert.ok(approval.includes('판정기준 승인이 필요합니다.'));
 assert.ok(!approval.includes('DOMAIN_RULEPACK_UNAPPROVED'));
 assert.equal(render({decision_status:'decided'},null), '');
-assert.ok(render(null,null,[]).includes('아직 없습니다'));
+assert.ok(render(null,null,[]).includes('확인된 사실이 기록되지 않았습니다'));
+const unsupported=render(null,null,[{...elements[0],evidence_refs:[]}]);
+assert.ok(!unsupported.includes('2040년'));
+assert.ok(unsupported.includes('확인된 사실이 기록되지 않았습니다'));
 console.log('partial summary passed');
 """
     for key, path in {

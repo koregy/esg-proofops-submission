@@ -55,7 +55,7 @@ await scopeClient.getScopePlan("d1");
 assert.equal(scopeCalls.at(-1).method, "GET");
 await scopeClient.editScope("d1", scope, [1], [1, 2]);
 assert.equal(scopeCalls.at(-1).headers["If-Match"], '"2"');
-assert.deepEqual(JSON.parse(scopeCalls.at(-1).body), { selected_claim_pages: [1], selected_evidence_pages: [1, 2] });
+assert.deepEqual(JSON.parse(scopeCalls.at(-1).body), { selected_claim_pages: [1], selected_evidence_pages: [1, 2], manual_selection: true });
 stale = true;
 await assert.rejects(scopeClient.editScope("d1", scope, [1], [1, 2]), e => e.status === 412 && e.code === "SCOPE_CONFLICT" && /최신 계획/.test(e.userMessage));
 stale = false;
@@ -75,8 +75,16 @@ for (const [status, code, retry, expect] of [
 }
 const failing = c.createHostedClient({ fetchImpl: async () => json(429, { error: { code: "QUEUE_FULL" } }, { "Retry-After": "60" }) });
 await assert.rejects(failing.runtime(), e => e.status === 429 && e.retryAfter === 60);
-const down = c.createHostedClient({ fetchImpl: async () => { throw new TypeError("net"); } });
-await assert.rejects(down.runtime(), e => e.status === 0);
+let reconnectCalls = 0; const reconnectMessages = [];
+const down = c.createHostedClient({ sleep: async () => {}, fetchImpl: async () => {
+  if (++reconnectCalls === 1) throw new TypeError("net");
+  return json(200, { analysis_backend: "r108" });
+} });
+down.subscribeConnection(message => reconnectMessages.push(message));
+assert.equal((await down.runtime()).analysis_backend, "r108");
+assert.equal(reconnectCalls, 2);
+assert.ok(reconnectMessages.some(message => message.includes("자동 재시도")));
+assert.equal(reconnectMessages.at(-1), "");
 
 // polling: backoff grows, 429 Retry-After honoured, stops at terminal
 const sleeps = []; let n = 0;
@@ -126,7 +134,7 @@ assert.throws(() => c.parsePageSelection("a", 5), /숫자/);
 const html = el => renderToString(createElement(MemoryRouter, null, el));
 const runtimeOff = { accept_new_runs: false, accept_uploads: true, live_analysis: false, upload_notice: "원본 PDF 7일 보관", limits: { selected_pages: 2 } };
 const off = html(createElement(v.RuntimeOff, { runtime: runtimeOff }));
-assert.match(off, /현재 실시간 분석이 꺼져 있습니다/); assert.match(off, /href="\/demo"/);
+assert.match(off, /실시간 분석을 일시 중지했습니다/); assert.match(off, /href="\/demo"/);
 const view = html(createElement(v.RunOutcomeView, { run: { ...run, status: "partial_blocked", error_code: "LIVE_BINDING_UNAVAILABLE" } }));
 assert.match(view, /보류/); assert.match(view, /근거 없음/); assert.doesNotMatch(view, /분석 완료/);
 assert.match(html(createElement(v.RunOutcomeView, { run: { ...run, queue_position: 3 } })), /대기 순번 3/);
@@ -149,33 +157,34 @@ assert.match(rHtml, /합성 주장 문장 하나/); assert.match(rHtml, /p\.22/)
 assert.match(rHtml, /원문 확인 필요/);
 assert.match(rHtml, /R108_NEEDS_REVIEW|일부 주장이 사람 검토/); assert.match(rHtml, /일부 주장이 사람 검토를 기다리고/);
 assert.match(rHtml, /분류 미합의/);
-assert.match(rHtml, /mini-status good">E3 · SUBSTANTIATED/);
+assert.match(rHtml, /mini-status good">E3 · 입증 요건 충족/);
 const aHtml = html(createElement(rv.ResultView, { result: { ...result, claims: [claimA], reviews: [] } }));
-assert.match(aHtml, /확인되지 않음\(근거 없음 아님\)/);
-assert.match(aHtml, /확정 등급 아님/); assert.match(aHtml, /가능 범위 E1–E3/); assert.match(aHtml, /범위는 등급이 아니며/);
+assert.match(aHtml, /인정된 근거 미연결\(확인 필요\)/);
+assert.match(aHtml, /판정 보류/); assert.match(aHtml, /가능 범위 E1–E3/); assert.match(aHtml, /범위는 등급이 아니며/);
 assert.doesNotMatch(aHtml, /확정 등급 E/); assert.doesNotMatch(aHtml, /근거 없음\(검증된/);
 assert.match(aHtml, /합성 주장 문장 하나/);
 // confirmed + provenance after resolve
 const bHtml = html(createElement(rv.ResultView, { result: { ...result, claims: [claimB], reviews: [] } }));
-assert.match(bHtml, /확정 등급 E3 · SUBSTANTIATED/); assert.match(bHtml, /사람 확인/);
-assert.equal(m.gradeSummary(claimC).headline, "확정 등급 아님");
-assert.equal(m.elementStateText("unknown", "verified"), "확인되지 않음(근거 없음 아님)");
+assert.match(bHtml, /확정 등급 E3 · 입증 요건 충족/); assert.match(bHtml, /사람 확인/);
+assert.equal(m.gradeSummary(claimC).headline, "판정 보류");
+assert.equal(m.elementStateText("unknown", "verified"), "인정된 근거 미연결(확인 필요)");
 assert.equal(m.elementStateText("present", "unverified"), "원문 대조 필요");
 // partial_blocked outcome shows Korean hold reasons from the inline result
 const blockedWithResult = c.runOutcome({ ...run, status: "partial_blocked", error_code: "R108_NEEDS_REVIEW", result });
 assert.ok(blockedWithResult.reasons.some(r => r.includes("사람 검토")) && blockedWithResult.reasons.some(r => r.includes("근거 없음’이 아닙니다")));
 assert.match(c.holdReasonText("LINUX_SOURCE_READER_UNRESOLVED"), /원문 판독기/);
-assert.match(c.holdReasonText("ZZZ"), /ZZZ/);
+assert.match(c.holdReasonText("ZZZ"), /상세 사유는 제공되지 않았습니다/);
+assert.doesNotMatch(c.holdReasonText("ZZZ"), /ZZZ/);
 // run status: stage / progress / queue_position
 const runningHtml = html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", stage: "extract", progress: 0.4, queue_position: null } }));
 assert.match(runningHtml, /주장 추출/); assert.match(runningHtml, /진행 40%/); assert.match(runningHtml, /<progress/);
 assert.match(html(createElement(v.RunOutcomeView, { run: { ...run, queue_position: 2, stage: "queued", progress: 0 } })), /대기 순번 2/);
 // review form: reviewer/admin only
 const asReviewer = html(createElement(rv.ResultView, { result: { ...result, claims: [claimA] }, role: "reviewer", client, runId: "r1" }));
-assert.match(asReviewer, /사람 검토/); assert.match(asReviewer, /검토 제출/); assert.match(asReviewer, /근거 없음 — 검색 범위가 검증되지 않아 서버가 거부할 수 있습니다/);
+assert.match(asReviewer, /사람 검토/); assert.match(asReviewer, /검토 제출/); assert.match(asReviewer, /근거 없음\(검증된 검색 범위\).*검색 범위가 검증되지 않아 서버가 거부할 수 있습니다/);
 assert.match(html(createElement(rv.ResultView, { result: { ...result, claims: [claimA] }, role: "admin", client, runId: "r1" })), /검토 제출/);
 const asViewer = html(createElement(rv.ResultView, { result: { ...result, claims: [claimA] }, role: "viewer", client, runId: "r1" }));
-assert.doesNotMatch(asViewer, /검토 제출/); assert.match(asViewer, /reviewer 또는 admin 역할만 처리/);
+assert.doesNotMatch(asViewer, /검토 제출/); assert.match(asViewer, /검토자 또는 관리자만 처리/);
 // allowed choices: present disabled when no citation exists
 const noRef = m.allowedChoices({ ...claimA, missing_evidence: [] }, el("M3", "unknown"));
 assert.equal(noRef.find(x => x.state === "present").disabled, true);
@@ -208,7 +217,7 @@ const last = rc.at(-1);
 assert.equal(last.url, "/hosted-api/v1/runs/r1/reviews/rv1/resolve"); assert.equal(last.method, "POST");
 assert.equal(last.headers["If-Match"], '"3"'); assert.equal(last.headers["X-CSRF-Token"], "CSRF9"); assert.equal(last.headers["Idempotency-Key"], "pk-fixed");
 assert.equal(resolved.decision.evidence_grade, "E3");
-assert.equal(m.decisionLine(resolved.decision), "E3 · SUBSTANTIATED"); assert.equal(m.reviewStatusText(resolved.decision.review_status), "사람 확인");
+assert.equal(m.decisionLine(resolved.decision), "E3 · 입증 요건 충족"); assert.equal(m.reviewStatusText(resolved.decision.review_status), "사람 확인");
 for (const status of ["409", "412"]) {
   mode = status;
   await assert.rejects(reviewClient.resolveReview("r1", "rv1", 3, body), e => e.isConflict === true && /새로고침/.test(e.userMessage), status);
@@ -225,14 +234,34 @@ assert.match(del.headers["Idempotency-Key"], /^pk-/); assert.equal(del.headers["
 mode = "403";
 await assert.rejects(reviewClient.deleteDocument("d1"), e => e.status === 403 && /권한/.test(e.userMessage));
 const source = (await import("node:fs")).readFileSync(new URL("../src/features/hosted/HostedAnalysis.tsx", import.meta.url), "utf8");
-assert.match(source, /본인이 올린 문서이거나 테넌트 관리자/); assert.doesNotMatch(source, /admin 역할/);
+assert.match(source, /본인이 올린 문서이거나 작업 공간 관리자/); assert.doesNotMatch(source, /admin 역할/);
 // result retrieval
 mode = "res";
-const resClient = c.createHostedClient({ fetchImpl: async url => json(200, url.endsWith("/result") ? result : {}) });
+const resClient = c.createHostedClient({ fetchImpl: async url => { assert.equal(url, "/hosted-api/v1/runs/r1/result?w18=true"); return json(200, result); } });
 assert.equal((await resClient.getResult("/v1/runs/r1/result")).claims.length, 3);
 
 assert.match(c.holdReasonText("PROCESSING_UNCERTAIN"), /처리 불확실/);
 assert.match(c.holdReasonText("BUDGET_EXHAUSTED"), /예산 상한으로 미분석/);
-assert.match(html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", claims_extracted: 3, claims_processed: 1 } })).replace(/<!-- -->/g, ""), /추출된 주장 3개 · 태깅 처리 1개/);
+assert.match(html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", claims_extracted: 3, claims_processed: 1 } })).replace(/<!-- -->/g, ""), /추출된 주장 3건 · 근거 대조 1건/);
+// X3 legacy claim detail uses the same four-part source/hold contract.
+const cw = await server.ssrLoadModule("/src/features/claims/ClaimWorkspace.tsx");
+const holdRef = { source_id: "x3-source", document_version_id: "x3-version", parse_manifest_id: "x3-parser", page_num: 88, quote: "232.2 MWh", char_start: 1, char_end: 10, location_quality: "located", verification_state: "verified", bbox: [1, 1, 2, 2], raw_text_sha256: "0".repeat(64), printed_page_label: null };
+const detailCard = html(createElement(cw.PartialClaimSummary, {
+  decision: { decision_status: "blocked_evidence", missing_elements: ["P2"], gap_ids: [] },
+  elements: [{ element_id: "P1", state: "present", evidence_refs: [holdRef], normalized_value: "232.2 MWh" }, { element_id: "P2", state: "unknown", evidence_refs: [], normalized_value: null }],
+  sources: [holdRef], rawCandidates: [], holdReasons: ["처리 실패 상세 확인 필요"], evidenceNote: "서버 원인 설명 그대로",
+  projection: { blocked_reason: "위치 귀속 확인 필요", blocked_action: "동일 시설의 표 행을 확인해 주세요." }, onSourceOpen() {},
+}));
+for (const expected of ["확인된 사실", "정확한 원문", "미해결 원인", "다음 확인", "88쪽", "232.2 MWh", "서버 원인 설명 그대로", "동일 시설의 표 행을 확인해 주세요."]) assert.ok(detailCard.includes(expected), expected);
+assert.doesNotMatch(detailCard, /누락된 입증 요소|기업.*결손|원문에서 확인 안 됨/);
+// W21: stage/progress values remain explicit; unavailable counts are not invented.
+const progressHtml = html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", stage: "tag", progress: .65, claims_extracted: 12 } })).replace(/<!-- -->/g, "");
+assert.match(progressHtml, /진행 65%/);
+assert.match(progressHtml, /aria-current="step"><b>3. 근거 대조/);
+assert.match(progressHtml, /근거 대조 집계 중/);
+assert.match(progressHtml, /예상 소요 약 20–45분.*기존 15–30쪽 분석 사례 기준/);
+const unknownProgressHtml = html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", stage: "unknown_stage" } }));
+assert.match(unknownProgressHtml, /<progress max="1" aria-label="분석 진행률"/);
+assert.doesNotMatch(unknownProgressHtml, /unknown_stage|NaN|진행 0%/);
 await server.close();
 console.log("hosted tests passed");

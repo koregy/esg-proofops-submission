@@ -456,9 +456,56 @@ main.landing .faq-inner li:last-child { margin-bottom: 0 !important }
 .claim-list button.claim-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; min-height: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer }
 .claim-list button.claim-item:hover:not(:disabled) { border-color: var(--line) }
 .live-claims-layout { margin-top: 20px }
+.duplicate-count { display: inline-block; margin: 0 8px 7px 0; padding: 3px 8px; border-radius: 999px; background: #f1eee6; color: var(--ink-2); font-size: 11px; font-weight: 700 }
+.claim-list .claim-table-context { display: grid; gap: 4px; margin: 6px 0 8px; color: var(--ink-2); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere }
+.claim-list .claim-table-context span { display: block }
+.table-observation-detail { border-top: 1px solid var(--line); padding: 16px 0; color: var(--ink-2); overflow-wrap: anywhere }
+.table-observation-detail h4 { margin: 0 0 7px; font-size: 13px }
+.table-observation-detail p { margin: 0; font-size: 13px; line-height: 1.65 }
+.duplicate-detail ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none }
+.duplicate-detail li button { display: grid; gap: 4px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink-2); text-align: left; font: inherit; font-size: 12px; overflow-wrap: anywhere }
+.duplicate-detail li button[aria-pressed=true] { border-color: var(--green); box-shadow: inset 3px 0 var(--green) }
+.duplicate-detail li button span { line-height: 1.55 }
 /* Header: menu centred between equal side columns now that the action buttons are gone */
 @media (min-width: 761px) { .site-header-inner { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important } .site-header-inner > .brand { justify-self: start } }
 
 /* Guide page: compact intro and centred section headings like the other guide blocks */
 main.guide-main > section.hero { padding: 96px 40px 72px !important }
 main.guide-main .uses-head { text-align: center }
+
+.claim-detail, .claim-list { scroll-margin-top: 84px }
+.prompt > h2 { font-size: 19px; margin: 20px 24px 10px }
+.prompt > p { margin: 0 24px 20px; color: var(--ink-2); line-height: 1.7 }
+
+/* PA6 authenticated source pages: normalized overlays share the image canvas. */
+.source-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.source-controls label { display:flex; align-items:center; gap:8px; }
+.source-scroll { max-width:100%; overflow:auto; border:1px solid var(--line); background:var(--paper); }
+.source-canvas { position:relative; flex-shrink:0; }
+.source-canvas img { display:block; width:100%; height:100%; }
+.source-highlight { position:absolute; border:2px solid #b95a12; background:rgba(255,183,62,.22); pointer-events:none; box-sizing:border-box; }
+.demo-site:has(.analyze-main .hosted-analysis) .site-header { border-bottom: 1px solid var(--line) }
+.demo-site:has(.analyze-main .hosted-analysis) .site-header nav a,
+.demo-site:has(.analyze-main .hosted-analysis) .footer-inner nav a { display: inline-flex; align-items: center; min-height: 44px }
+.demo-site:has(.analyze-main .hosted-analysis) .footer-inner { gap: 24px; flex-wrap: wrap }
+.demo-site:has(.analyze-main .hosted-analysis) .footer-inner > div { flex: 1 1 360px; max-width: 520px }
+.demo-site:has(.analyze-main .hosted-analysis) .footer-inner > nav { gap: 16px }
+.demo-site:has(.analyze-main .hosted-analysis) .footer-inner > span { padding-top: 12px }
+@media (max-width: 760px) {
+  .demo-site:has(.analyze-main .hosted-analysis) .footer-inner > div { flex: initial }
+}
+.source-viewer { min-width:0; }
+.source-controls label { white-space:nowrap; flex-wrap:wrap; }
+
+/* X3: existing result cards, exact server quotes and actionable holds. */
+.missing-evidence-card { min-width: 0; border-left: 3px solid #bc914d; padding: 0 0 0 14px; }
+.missing-evidence-card h4 { margin: 18px 0 8px; font-size: 14px; }
+.missing-evidence-card h4:first-child { margin-top: 8px; }
+.missing-evidence-card p, .missing-evidence-card li { overflow-wrap: anywhere; line-height: 1.65; }
+.missing-evidence-card ul { padding-left: 20px; margin: 6px 0 12px; }
+.missing-evidence-card blockquote { margin: 8px 0 12px; white-space: pre-wrap; color: inherit; }
+.hold-source-list { list-style: none; padding-left: 0 !important; }
+.hold-missing-fields { font-size: 12px; color: #605e57; padding: 10px 12px; background: #f4f2ed; border-radius: 6px; }
+
+.missing-evidence-card strong { display: inline; margin: 0; font-family: inherit; font-size: inherit; font-weight: 600; line-height: inherit; color: inherit; }
+.missing-evidence-card p { letter-spacing: normal; }
