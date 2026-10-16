@@ -2,9 +2,9 @@
 
 import json
 
-from evaluation import prefilter_comparison as comparison
-from evaluation.claim_prefilter import prepare
 from tests.acceptance.test_claims import TENANT, graph_of
+from tests.support import prefilter_comparison as comparison
+from tests.support.claim_prefilter import prepare
 
 
 def test_response_failure_is_retained_and_not_scored_as_zero_recall(tmp_path):

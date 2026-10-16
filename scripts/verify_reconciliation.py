@@ -20,18 +20,18 @@ RECONCILIATION_PATHS = (
     "packages/proofops/application/reconciliation",
     "packages/proofops/adapters/reconciliation",
     "packages/proofops/adapters/dart",
-    "evaluation/reconciliation_cli.py",
-    "evaluation/reconciliation_fixtures.py",
-    "evaluation/reconciliation_collect.py",
-    "evaluation/reconciliation_prepare.py",
-    "evaluation/reconciliation_source_audit.py",
-    "evaluation/reconciliation_benchmark.py",
+    "tests/support/reconciliation_cli.py",
+    "tests/support/reconciliation_fixtures.py",
+    "tests/support/reconciliation_collect.py",
+    "tests/support/reconciliation_prepare.py",
+    "tests/support/reconciliation_source_audit.py",
+    "tests/support/reconciliation_benchmark.py",
 )
 PRODUCT_PATHS = (
     "packages/proofops/application/uploads_security.py",
     "packages/proofops/adapters/local/reconciliation_store.py",
     "apps/api/src/proofops_api/routers/reconciliation.py",
-    "evaluation/reconciliation_import.py",
+    "tests/support/reconciliation_import.py",
 )
 NEW_SOURCE_PATHS = (
     "scripts/verify_reconciliation.py",
@@ -244,7 +244,7 @@ class ReleaseVerifier:
         fixtures = self.output / "fixtures"
         generated = self.command(
             "fixture_generation",
-            ["-m", "evaluation.reconciliation_fixtures", "--output", str(fixtures)],
+            ["-m", "tests.support.reconciliation_fixtures", "--output", str(fixtures)],
         )
         examples = ROOT / "contracts/reconciliation/examples"
         case_names = sorted(path.stem for path in examples.glob("*.json"))
@@ -264,7 +264,7 @@ class ReleaseVerifier:
             f"cli_{name}",
             [
                 "-m",
-                "evaluation.reconciliation_cli",
+                "tests.support.reconciliation_cli",
                 "--packet",
                 str(case / "packet.json"),
                 "--policy",

@@ -1,4 +1,4 @@
-"""Failing-first candidate tests for evaluation.table_numeric_candidates.
+"""Failing-first candidate tests for tests.support.table_numeric_candidates.
 
 All shapes are taken from real archived HTML in
 .local/table-recovery/{kia,kb,naver}/standard/response.json
@@ -8,8 +8,8 @@ Inline excerpts only; no PDF mutation, no network, no ledger.
 
 import pytest
 
-from evaluation.html_table_cells import parse_table_cells
-from evaluation.table_numeric_candidates import (
+from tests.support.html_table_cells import parse_table_cells
+from tests.support.table_numeric_candidates import (
     candidates_from_html,
     parse_numeric_literal,
     period_qualifier,
@@ -289,7 +289,7 @@ def test_candidates_from_html_reuses_parser():
 
 
 def test_automatic_explicit_header_discovery_preserves_repeated_target_values():
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     result = discover_table_candidates(KIA10)
     assert len(result["candidates"]) == 6
@@ -314,7 +314,7 @@ def test_automatic_explicit_header_discovery_preserves_repeated_target_values():
 
 
 def test_discovery_preserves_scope_and_company_group_headers():
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         '<table><tr><td colspan="2">구분</td><td>단위</td><td>2024</td></tr>'
@@ -331,7 +331,7 @@ def test_discovery_preserves_scope_and_company_group_headers():
 
 
 def test_percent_value_requires_explicit_matching_unit_header():
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         "<table><tr><td>지표</td><td>단위</td><td>2022</td></tr>"
@@ -347,7 +347,7 @@ def test_percent_value_requires_explicit_matching_unit_header():
 
 
 def test_footnotes_keep_literal_and_column_basis_without_becoming_verified():
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         '<table><tr><td rowspan="2">지표</td><td rowspan="2">단위</td>'
@@ -372,7 +372,7 @@ def test_footnotes_keep_literal_and_column_basis_without_becoming_verified():
 
 
 def test_previous_metric_rows_are_context_not_inferred_parent_and_stop_at_company():
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         '<table><tr><td colspan="2">지표</td><td>단위</td><td>2024</td></tr>'
@@ -398,7 +398,7 @@ def test_explicit_header_after_full_width_title_row_is_discovered():
     only the leading full-width caption rows are skipped. Nothing is promoted:
     every candidate stays unverified and ineligible for scoring.
     """
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         "<table>"
@@ -439,7 +439,7 @@ def test_non_full_width_row_before_header_still_defers_no_fabrication():
     Skipping only applies to unambiguous full-width title/caption rows. Any other
     leading layout keeps the conservative deferral instead of guessing a header.
     """
-    from evaluation.table_numeric_candidates import discover_table_candidates
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     html = (
         "<table>"

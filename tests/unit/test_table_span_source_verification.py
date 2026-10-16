@@ -673,6 +673,8 @@ def test_structural_guard_failure_never_enters_line_attestation(monkeypatch):
 
 
 def test_existing_full_cell_and_paragraph_receipts_keep_head_hashes(monkeypatch):
+    # 934cf5f added literal continuation refs in claims.py (0cfaad53 -> cb587c66).
+    # New receipts bind that validator; persisted historical receipts stay unchanged.
     from proofops.adapters.local import claim_source_verification, table_span_source_verification
 
     source, graph = fixture()
@@ -710,9 +712,9 @@ def test_existing_full_cell_and_paragraph_receipts_keep_head_hashes(monkeypatch)
 
     assert (
         canonical_hash(table_receipt)
-        == "e796627f338bccd44187111da2c580934088a18affaf3f122d2773f728548e17"
+        == "58212dfe9334d75c4f414b6fa5acab72928630ec8aaf8d33bcbab877e7d2cc66"
     )
     assert (
         canonical_hash(paragraph_receipt)
-        == "f437ae1079f6fd47d045fc0847de7012e559ae55d307a905947234dbcaa78275"
+        == "0d3a50d232cc3715930b12d5a7bd1ca855b0ab9548096931599fabf46932ed92"
     )

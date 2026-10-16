@@ -2,9 +2,9 @@ from copy import deepcopy
 
 import pytest
 
-from evaluation.table_role_pilot import prepare_rows, validate_roles
 from tests.acceptance.test_parsing import TENANT
 from tests.acceptance.test_table_bindings import setup_case
+from tests.support.table_role_pilot import prepare_rows, validate_roles
 
 
 def test_roles_cover_cells_once_with_same_row_header_sources_and_no_grades():

@@ -5,7 +5,7 @@ from pathlib import Path
 import jsonschema
 from proofops.adapters.dart import ArtifactStore, DartClient
 
-from evaluation.reconciliation_collect import collect, main
+from tests.support.reconciliation_collect import collect, main
 
 
 def test_pinned_collection_preserves_wire_bytes(tmp_path: Path):

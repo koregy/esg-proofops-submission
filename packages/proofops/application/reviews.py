@@ -23,16 +23,19 @@ from uuid import NAMESPACE_URL, uuid5
 from proofops.application.authorization import AuthContext
 from proofops.application.evidence.binding import ClaimContext, accept_binding, relation_tags_for
 from proofops.application.evidence.report_level import POLICIES as REPORT_LEVEL_POLICIES
-from proofops.application.evidence.report_level import check_report_level
+from proofops.application.evidence.report_level import check_report_level, scope_rejection_reason
 from proofops.application.evidence.retrieval import EvidencePacket
 from proofops.application.evidence.span_citations import verify_source_ref
 from proofops.application.ingest.graph_fusion import CanonicalDocumentGraph
 from proofops.application.tagging.consensus import (
-    PARTIAL_FACTS_HASH,
-    PARTIAL_FACTS_V1,
+    PARTIAL_FACTS_PROFILES,
     ConsensusResult,
     form_consensus,
 )
+from proofops.application.tagging.fact_assembly_c2 import FactAssemblyReceiptV1
+from proofops.application.tagging.fact_assembly_c3 import PROFILE as C3_PROFILE
+from proofops.application.tagging.fact_assembly_c3_v2 import PROFILE as C3_V2_PROFILE
+from proofops.application.tagging.fact_assembly_c4 import PROFILE as C4_PROFILE
 from proofops.application.tagging.report_level_link import replay_report_level_link, strict_fallback
 from proofops.application.tagging.service import TagRun
 from proofops.domain.audit import AuditConflict
@@ -106,6 +109,7 @@ class ReviewInputs:
     fact_assembly_profile: str = "strict-v1"
     report_level_link: dict | None = None
     report_level_review: tuple[dict, ...] = ()
+    fact_assembly_receipt: FactAssemblyReceiptV1 | None = None
 
     def snapshot(self) -> dict:
         snapshot = dict(
@@ -138,15 +142,77 @@ class ReviewInputs:
             if self.rule_context.local_synthetic
             else "live",
         )
-        if self.fact_assembly_profile == PARTIAL_FACTS_V1:
-            snapshot["fact_assembly"] = {"profile": PARTIAL_FACTS_V1, "sha256": PARTIAL_FACTS_HASH}
+        if self.fact_assembly_profile in PARTIAL_FACTS_PROFILES:
+            snapshot["fact_assembly"] = {
+                "profile": self.fact_assembly_profile,
+                "sha256": PARTIAL_FACTS_PROFILES[self.fact_assembly_profile],
+            }
         if self.report_level_link is not None:
             snapshot["report_level_link"] = self.report_level_link
             snapshot["report_level_review"] = list(self.report_level_review)
+        if self.fact_assembly_receipt is not None:
+            snapshot["fact_assembly_receipt"] = self.fact_assembly_receipt.to_dict()
+            from proofops.application.tagging.fact_assembly_c3 import POLICY_HASH, PROFILE
+
+            if self.fact_assembly_profile == PROFILE:
+                snapshot["fact_assembly"] = dict(profile=PROFILE, sha256=POLICY_HASH)
+        if self.fact_assembly_profile == C4_PROFILE and self.fact_assembly_receipt is not None:
+            from proofops.application.tagging.fact_assembly_c4 import POLICY_HASH as C4_HASH
+
+            snapshot["fact_assembly"] = dict(profile=C4_PROFILE, sha256=C4_HASH)
+        if self.fact_assembly_profile == C3_V2_PROFILE and self.fact_assembly_receipt is not None:
+            snapshot["fact_assembly"] = dict(
+                profile=C3_V2_PROFILE,
+                sha256=self.fact_assembly_receipt.to_dict()["policy_sha256"],
+            )
         return snapshot
 
     def validate(self) -> None:
         claim, data = self.context.claim, self.packet.to_dict()
+        from proofops.application.tagging.fact_assembly_c3 import PROFILE, validate_publication
+
+        if self.fact_assembly_profile == C4_PROFILE:
+            from proofops.application.tagging.fact_assembly_c4 import (
+                validate_publication as c4_validate,
+            )
+
+            try:
+                c4_validate(self)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ReviewRejected("C4_PUBLICATION_REPLAY_MISMATCH", 409) from exc
+            return
+        if self.fact_assembly_profile == PROFILE:
+            try:
+                validate_publication(self)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ReviewRejected("C3_PUBLICATION_REPLAY_MISMATCH", 409) from exc
+            return
+        if self.fact_assembly_profile == C3_V2_PROFILE:
+            from proofops.application.tagging.fact_assembly_c3_v2 import (
+                validate_publication as c3_v2_validate,
+            )
+
+            try:
+                c3_v2_validate(self)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ReviewRejected("C3_V2_PUBLICATION_REPLAY_MISMATCH", 409) from exc
+            return
+        if self.fact_assembly_receipt is not None:
+            from proofops.application.tagging.fact_assembly_c2 import replay
+
+            try:
+                replay(
+                    self.fact_assembly_receipt.to_dict(),
+                    context=self.context,
+                    graph=self.original,
+                    packet=self.packet,
+                    rulepack=self.rulepack,
+                    tag_revision=self.tag_revision,
+                )
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ReviewRejected("FACT_ASSEMBLY_REPLAY_MISMATCH", 409) from exc
+            if self.decision is not None:
+                raise ReviewRejected("C2_PUBLICATION_DISABLED", 409)
         if (
             (claim.tenant_id, self.original.tenant_id, self.rulepack.tenant_id)
             != (self.rule_context.tenant_id,) * 3
@@ -209,7 +275,7 @@ class ReviewInputs:
             self.decision is not None
             and self.decision.decision_status == "decided"
             and (
-                self.fact_assembly_profile == PARTIAL_FACTS_V1
+                self.fact_assembly_profile in PARTIAL_FACTS_PROFILES
                 or self.consensus.review_status != "auto_confirmed"
             )
         ):
@@ -974,6 +1040,16 @@ class ReviewService:
                     )
                 names = MAPPINGS[body["track"]][element.element_id]
                 previous = [facts.get(name) for name in names]
+                scope_reason = scope_rejection_reason(
+                    element.element_id,
+                    element.evidence_refs,
+                    rulepack=inputs.rulepack,
+                    original=inputs.original,
+                    policy=element.reason_code,
+                )
+                if element.state == "present" and scope_reason:
+                    # Invalid present request cannot change the prior unknown revision.
+                    raise ReviewRejected(scope_reason)
                 report_level = (
                     element.state == "present"
                     and element.reason_code is not None
@@ -1178,6 +1254,11 @@ class ReviewService:
                 for r in inputs.tag_runs
                 if r.guarded
             }
+            if inputs.fact_assembly_profile in (C3_PROFILE, C3_V2_PROFILE, C4_PROFILE):
+                headers = {
+                    (r["raw"]["safe_harbor_category"], r["raw"]["superlative_quote"])
+                    for r in inputs.fact_assembly_receipt.to_dict()["raw_receipts"]
+                }
             if len(headers) != 1:
                 raise ReviewRejected("CATEGORY_REVIEW_REQUIRED", 409)
             category, superlative = next(iter(headers))
@@ -1185,7 +1266,10 @@ class ReviewService:
                 # Only the confirmed classification changes; the observed headers
                 # above stay pinned in the receipt and in ``inputs``.
                 category = corrected_category
-            first = inputs.tag_runs[0]
+            if inputs.fact_assembly_profile in (C3_PROFILE, C3_V2_PROFILE, C4_PROFILE):
+                first = inputs.consensus.confirmed_tags
+            else:
+                first = inputs.tag_runs[0]
             confirmed = ConfirmedTags(
                 actor.tenant_id,
                 inputs.original.document_version_id,
@@ -1207,6 +1291,14 @@ class ReviewService:
                 replace(inputs.rule_context, decision_revision=decision_revision),
                 inputs.rulepack,
             )
+            if inputs.fact_assembly_receipt is not None and inputs.fact_assembly_profile not in (
+                C3_PROFILE,
+                C3_V2_PROFILE,
+                C4_PROFILE,
+            ):
+                # A reviewer cannot activate an unpublished experimental profile.
+                # CAS has already been checked by the store; no revision is written.
+                raise ReviewRejected("C2_PUBLICATION_DISABLED", 409)
             # Preserve the engine semantic hash exactly; review status is provenance metadata.
             api = decision.to_api_dict() | {"review_status": review_status}
             tag = dict(
@@ -1218,7 +1310,7 @@ class ReviewService:
                 review_reason=body["reason"],
                 input_snapshot_sha256=initial_snapshot_sha256,
             )
-            if inputs.fact_assembly_profile == PARTIAL_FACTS_V1:
+            if inputs.fact_assembly_profile in PARTIAL_FACTS_PROFILES:
                 tag["fact_assembly"] = inputs.snapshot()["fact_assembly"]
             if applicability_receipt is not None:
                 if applicability_carried and applicability_ancestry:

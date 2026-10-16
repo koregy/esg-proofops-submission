@@ -24,9 +24,9 @@ from proofops.adapters.local.reconciliation_store import (
 from proofops.adapters.local.run_store import LocalSQLiteRunStore
 from proofops.application.authorization import AuthContext
 
-from evaluation.reconciliation_fixtures import build_case
 from tests.acceptance.test_upload import FOREIGN, TENANT
 from tests.integration.test_local_tag_runner import verified_setup
+from tests.support.reconciliation_fixtures import build_case
 
 CAPABILITIES = {
     "viewer": {"viewer"},

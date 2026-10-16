@@ -9,9 +9,9 @@ from proofops.application.numeric_analysis import (
     propose_numeric_bindings,
 )
 
-from evaluation.numeric_run import _load_bindings
 from tests.acceptance.test_numeric import case, row
 from tests.acceptance.test_parsing import TENANT
+from tests.support.numeric_run import _load_bindings
 
 
 def sample(statement="1 tCO2e 서울 2025 Scope 1 연결 시장기반", **changes):
@@ -155,7 +155,7 @@ def test_claim_scope_cue_without_source_role_never_defaults():
 def test_review_import_rejects_string_boolean(tmp_path):
     import json
 
-    from evaluation.numeric_run import InputRejected
+    from tests.support.numeric_run import InputRejected
 
     value, context = sample()
     data = asdict(propose(value, context)[0].binding)
@@ -172,7 +172,7 @@ def test_review_import_rejects_string_boolean(tmp_path):
 
 
 def test_cli_exports_pending_review_file_without_overwriting(monkeypatch, tmp_path, capsys):
-    from evaluation import numeric_run
+    from tests.support import numeric_run
 
     value, context = sample()
     proposal = asdict(propose(value, context)[0])

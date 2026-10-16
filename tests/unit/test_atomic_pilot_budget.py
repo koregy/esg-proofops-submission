@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from evaluation.atomic_pilot import extract_selected
 from tests.acceptance.test_claims import COMPOUND, TENANT
 from tests.integration.test_section_pipeline import section_map
+from tests.support.atomic_pilot import extract_selected
 
 
 # Helper to create two paragraph blocks both on page 1 (same candidate page) for atomic_pilot scope.

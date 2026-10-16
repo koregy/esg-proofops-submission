@@ -3,12 +3,12 @@ from dataclasses import asdict
 
 import pytest
 
-from evaluation.claim_dimensions import FIELDS, prepare_dimensions, validate_dimensions
 from tests.acceptance.test_claims import COMPOUND, TENANT, graph_of
+from tests.support.claim_dimensions import FIELDS, prepare_dimensions, validate_dimensions
 
 
 def test_clause_review_keeps_parent_and_never_inherits_shared_boundary():
-    from evaluation.claim_dimensions import clause_review_candidates
+    from tests.support.claim_dimensions import clause_review_candidates
 
     text = "국내 사업장에서 93GWh를 조달했으며, 이를 통해 4만 톤을 감축했습니다."
     graph = graph_of(text)
@@ -45,7 +45,7 @@ def test_clause_review_keeps_parent_and_never_inherits_shared_boundary():
 
 
 def test_clause_review_retains_unsupported_parent():
-    from evaluation.claim_dimensions import clause_review_candidates
+    from tests.support.claim_dimensions import clause_review_candidates
 
     for text in (
         "93GWh를 조달했습니다.",
@@ -103,7 +103,7 @@ def test_metric_cannot_be_only_an_amount_or_unit_even_when_source_exact():
 
 
 def test_quantity_ranges_never_yield_a_single_endpoint():
-    from evaluation.claim_dimensions import quantity_candidates
+    from tests.support.claim_dimensions import quantity_candidates
 
     for text in (
         "20~50%의 투자비",
@@ -124,7 +124,7 @@ def test_quantity_ranges_never_yield_a_single_endpoint():
 
 
 def test_metric_split_rejects_a_quote_starting_inside_a_numeric_range():
-    from evaluation.claim_dimensions import separate_metric_quantity
+    from tests.support.claim_dimensions import separate_metric_quantity
 
     text = "최대 20~50%의 투자비 절감"
     graph = graph_of(text)
@@ -169,7 +169,7 @@ def test_metric_split_rejects_a_quote_starting_inside_a_numeric_range():
     ],
 )
 def test_metric_components_preserve_original_proposal_and_source(phrase, expected):
-    from evaluation.claim_dimensions import separate_metric_quantity
+    from tests.support.claim_dimensions import separate_metric_quantity
 
     text = phrase or "정보 없음"
     graph = graph_of(text)
@@ -208,7 +208,7 @@ def test_metric_components_preserve_original_proposal_and_source(phrase, expecte
 
 
 def test_semantic_token_ranges_cannot_borrow_from_another_claim():
-    from evaluation.claim_dimensions import semantic_tokens, validate_semantic_tokens
+    from tests.support.claim_dimensions import semantic_tokens, validate_semantic_tokens
 
     text = "A사는 국내 온실가스 배출량을 공개했다."
     graph = graph_of(text)
@@ -251,7 +251,7 @@ def test_semantic_token_ranges_cannot_borrow_from_another_claim():
 
 
 def test_semantic_dimensions_reject_borrowed_entities_and_extra_roles():
-    from evaluation.claim_dimensions import validate_semantics
+    from tests.support.claim_dimensions import validate_semantics
 
     text = "A사는 국내 사업장 온실가스 배출량을 공개했다. 온실가스를 감축했다."
     graph = graph_of(text)
@@ -323,7 +323,7 @@ def test_dimension_quotes_are_bound_to_their_claim_and_null_stays_unknown():
 
 
 def test_period_candidate_roles_do_not_generate_quotes():
-    from evaluation.claim_dimensions import period_candidates, validate_periods
+    from tests.support.claim_dimensions import period_candidates, validate_periods
 
     graph = graph_of(COMPOUND)
     b = graph.blocks[0]
@@ -350,7 +350,7 @@ def test_period_candidate_roles_do_not_generate_quotes():
 
 
 def test_quantity_candidates_preserve_scope_approximation_and_units():
-    from evaluation.claim_dimensions import quantity_candidates, validate_quantities
+    from tests.support.claim_dimensions import quantity_candidates, validate_quantities
 
     text = (
         "2019년 Scope 1 및 Scope 2 기준값은 951만 tCO₂e이며, "
@@ -394,7 +394,7 @@ def test_quantity_candidates_preserve_scope_approximation_and_units():
 
 
 def test_unit_candidates_do_not_match_english_words_or_percentage_points():
-    from evaluation.claim_dimensions import quantity_candidates
+    from tests.support.claim_dimensions import quantity_candidates
 
     packet = {
         "untrusted_document_data": {"claims": [dict(id="q0", text="whole warehouse 3%p 5%포인트")]}
@@ -403,7 +403,7 @@ def test_unit_candidates_do_not_match_english_words_or_percentage_points():
 
 
 def test_unsupported_scope_ranges_do_not_become_partial_scopes():
-    from evaluation.claim_dimensions import quantity_candidates
+    from tests.support.claim_dimensions import quantity_candidates
 
     packet = {
         "untrusted_document_data": {"claims": [dict(id="q0", text="Scope 1–3 및 Scope 1·20")]}
@@ -412,7 +412,7 @@ def test_unsupported_scope_ranges_do_not_become_partial_scopes():
 
 
 def test_measurement_roles_preserve_claim_basis_and_unstated_boundaries():
-    from evaluation.claim_dimensions import validate_measurements
+    from tests.support.claim_dimensions import validate_measurements
 
     graph = graph_of(COMPOUND)
     b = graph.blocks[0]
@@ -447,7 +447,7 @@ def test_measurement_roles_preserve_claim_basis_and_unstated_boundaries():
 
 
 def test_reporting_period_cannot_be_an_organizational_boundary():
-    from evaluation.claim_dimensions import validate_semantics
+    from tests.support.claim_dimensions import validate_semantics
 
     for quote in ("2023년부터 2025년까지", "2023–2025", "2025년"):
         text = f"{quote} 국내 사업장 온실가스 배출량"

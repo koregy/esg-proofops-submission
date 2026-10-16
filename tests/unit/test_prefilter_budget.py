@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.claim_prefilter import prepare
-from evaluation.prefilter_comparison import execute
 from tests.acceptance.test_claims import TENANT, graph_of
+from tests.support.claim_prefilter import prepare
+from tests.support.prefilter_comparison import execute
 
 
 def _graph_and_two_packet_plan():
@@ -117,7 +117,7 @@ def test_execute_ordinary_invalid_still_allows_next_request(tmp_path):
 def test_run_sequencing_hardstop_across_modes_is_fail_closed(tmp_path, monkeypatch, code):
     from types import SimpleNamespace
 
-    from evaluation import prefilter_comparison as module
+    from tests.support import prefilter_comparison as module
 
     graph = graph_of("친환경 제품입니다.")
     calls = []

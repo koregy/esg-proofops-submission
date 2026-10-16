@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from evaluation.reconciliation_cli import InputRejected, load_json, main, write_json
+from tests.support.reconciliation_cli import InputRejected, load_json, main, write_json
 
 
 def test_projection_does_not_invent_explanation_or_confidence():
-    from evaluation.reconciliation_cli import project_result
+    from tests.support.reconciliation_cli import project_result
 
     result = {
         "item": "C1",
@@ -28,7 +28,7 @@ def test_projection_does_not_invent_explanation_or_confidence():
 
 
 def test_projection_includes_only_selected_verified_candidate():
-    from evaluation.reconciliation_cli import project_result
+    from tests.support.reconciliation_cli import project_result
 
     source = {"source_id": "e", "document_id": "doc", "quote": "explanation"}
     result = {

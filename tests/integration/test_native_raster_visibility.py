@@ -16,8 +16,8 @@ from tests.acceptance.test_parsing import TENANT, candidate, pdf
     "fault", ["none", "native_text", "clipped", "external_text", "native_receipt"]
 )
 def test_visibility_requires_both_native_gates_and_exact_external_reading(monkeypatch, fault):
-    from evaluation.native_raster_visibility import corroborate_native_visibility
-    from evaluation.raster_ocr import prepare_raster_ocr
+    from tests.support.native_raster_visibility import corroborate_native_visibility
+    from tests.support.raster_ocr import prepare_raster_ocr
 
     source = pdf()
     text = "Page 1 emissions 1234 tCO2e"

@@ -2,7 +2,7 @@ import pytest
 
 
 def test_layout_fragments_do_not_attach_status_to_adjacent_bullet():
-    from evaluation.table_layout_context import group_words
+    from tests.support.table_layout_context import group_words
 
     def w(index, text, x0, x1, top):
         return dict(index=index, text=text, bbox=[x0, top, x1, top + 7.5])
@@ -26,9 +26,9 @@ def test_layout_fragments_do_not_attach_status_to_adjacent_bullet():
 
 
 def test_layout_requires_matching_pdf_and_graph_source():
-    from evaluation.table_layout_context import table_layout_context
     from tests.acceptance.test_parsing import TENANT
     from tests.acceptance.test_table_bindings import setup_case
+    from tests.support.table_layout_context import table_layout_context
 
     graph, ids, _ = setup_case()
     with pytest.raises(ValueError, match="source"):
@@ -41,9 +41,9 @@ def test_real_pdf_words_reach_role_packet_as_context_only():
 
     from proofops.application.ingest.graph_fusion import fuse_candidates
 
-    from evaluation.table_role_pilot import prepare_rows, validate_roles
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.table_role_pilot import prepare_rows, validate_roles
 
     source = pdf()
     batch = replace(table([["Header"], ["value"]]), source_sha256=sha256(source).hexdigest())
@@ -70,9 +70,9 @@ def test_table_crop_is_source_bound_and_records_pixel_transform():
     from PIL import Image
     from proofops.application.ingest.graph_fusion import fuse_candidates
 
-    from evaluation.table_layout_context import table_crop
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.table_layout_context import table_crop
 
     source = pdf()
     graph = fuse_candidates(
@@ -96,10 +96,10 @@ def test_crop_retains_source_bound_outside_page_words_in_companion_context():
 
     from proofops.application.ingest.graph_fusion import fuse_candidates
 
-    from evaluation.table_layout_context import table_crop
-    from evaluation.table_role_pilot import prepare_rows
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.table_layout_context import table_crop
+    from tests.support.table_role_pilot import prepare_rows
 
     source = pdf()
     batch = table([["Header"], ["value"]])
@@ -137,9 +137,9 @@ def test_rotated_outside_labels_are_preserved_as_unreadable_context_not_dropped(
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject
 
-    from evaluation.table_layout_context import table_layout_context
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.table_layout_context import table_layout_context
 
     writer = PdfWriter()
     writer.append(PdfReader(BytesIO(pdf())))
@@ -184,9 +184,9 @@ def test_pdf_superscript_style_survives_word_flattening_and_model_packet():
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject
 
-    from evaluation.table_role_pilot import prepare_rows
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.table_role_pilot import prepare_rows
 
     writer = PdfWriter()
     writer.append(PdfReader(BytesIO(pdf())))
@@ -214,7 +214,7 @@ def test_pdf_superscript_style_survives_word_flattening_and_model_packet():
 
 
 def test_separate_marker_requires_unique_close_raised_native_words():
-    from evaluation.table_layout_context import separate_markers
+    from tests.support.table_layout_context import separate_markers
 
     def word(text, x0, x1, top, bottom, size):
         return dict(
@@ -246,7 +246,7 @@ def test_separate_marker_requires_unique_close_raised_native_words():
 
 
 def test_native_cell_matches_keep_duplicates_clipping_and_partial_text_unresolved():
-    from evaluation.table_layout_context import cell_source_matches, group_words
+    from tests.support.table_layout_context import cell_source_matches, group_words
 
     words = [
         dict(index=i, text=text, bbox=[i * 100, 0, i * 100 + 20, 10])

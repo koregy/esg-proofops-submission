@@ -54,8 +54,8 @@ def test_raster_ocr_policy_rejects_invalid_limits(kwargs):
 
 
 def test_evaluation_raster_exports_remain_compatible():
-    from evaluation import native_raster_visibility
-    from evaluation import raster_ocr as legacy_raster_ocr
+    from tests.support import native_raster_visibility
+    from tests.support import raster_ocr as legacy_raster_ocr
 
     assert legacy_raster_ocr.prepare_raster_ocr is raster_ocr.prepare_raster_ocr
     assert native_raster_visibility.corroborate_native_visibility is (

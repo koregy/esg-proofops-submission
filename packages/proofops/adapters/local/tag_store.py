@@ -9,15 +9,16 @@ from dataclasses import asdict
 from hashlib import sha256
 
 from proofops.adapters.cache.aws import CacheNamespace, CacheRequest
+from proofops.adapters.local.claim_source_policies import PAGE_OCR_PROFILES
 from proofops.adapters.local.claim_store import LocalClaimStore
 from proofops.application.budget import TokenUsage
 from proofops.application.evidence.binding import ClaimContext
 from proofops.application.evidence.retrieval import freeze_packet
 from proofops.application.ports.jobs import JobMessage
 from proofops.application.ports.models import ModelBinding
+from proofops.application.preflight import relation_settings_contract_valid
 from proofops.application.reviews import ReviewInputs
 from proofops.application.tagging.consensus import form_consensus, reviewable_decision
-from proofops.application.tagging.relations import SYSTEM_PROMPT as RELATION_SYSTEM_PROMPT
 from proofops.application.tagging.report_level_link import replay_report_level_link, strict_fallback
 from proofops.application.tagging.service import TaggingSettings, TagRun
 from proofops.domain.provenance import canonical_hash
@@ -25,10 +26,27 @@ from proofops.domain.rulepacks import RulePackSnapshot
 from proofops.domain.rules.engine import RuleContext, evaluate
 from proofops.domain.values import SourceRef, llm_tags_from_dict
 
+# Added to TagRun on 2026-09-27. Only absent/null is equivalent, only in
+# tag_runs during read comparison; persisted inputs and their hashes stay intact.
+TAG_RUN_READ_COMPAT_NULL_FIELDS = frozenset({"diagnostic_detail"})
+
+
+def _tag_replay_hash(snapshot):
+    comparable = snapshot | {
+        "tag_runs": [
+            {field: None for field in TAG_RUN_READ_COMPAT_NULL_FIELDS} | entry
+            for entry in snapshot["tag_runs"]
+        ]
+    }
+    return canonical_hash(comparable)
+
 
 def tagging_settings(snapshot, *, preliminary=False, relation=False):
     if preliminary and relation:
         raise ValueError("TAGGING_PROFILE_MISMATCH")
+    from proofops.application.tagging.decisions import validate_decision_snapshot
+
+    validate_decision_snapshot(snapshot)
     prefix = "relation" if relation else "preliminary" if preliminary else "tagging"
     if prefix + "_settings" not in snapshot:
         raise ValueError("TAGGING_PROFILE_MISMATCH")
@@ -52,10 +70,7 @@ def tagging_settings(snapshot, *, preliminary=False, relation=False):
             != snapshot["input_reservation_policy_hash"]
         ):
             raise ValueError("TAGGING_PROFILE_MISMATCH")
-        if relation and (
-            settings.model_profile != "upstage-relation-source-quotes-v1"
-            or settings.system_prompt != RELATION_SYSTEM_PROMPT
-        ):
+        if relation and not relation_settings_contract_valid(settings):
             raise ValueError("TAGGING_PROFILE_MISMATCH")
         return settings
     if preliminary or relation:
@@ -77,6 +92,9 @@ def tagging_settings(snapshot, *, preliminary=False, relation=False):
 
 
 def tag_pins(snapshot, extraction, extraction_hash):
+    from proofops.application.evidence.relation_attribution import snapshot_policy
+
+    attribution = snapshot_policy(snapshot)
     pins = dict(
         schema="local_tag_checkpoint_v1",
         synthetic=snapshot.get("tagging_mode") != "upstage_local",
@@ -107,6 +125,11 @@ def tag_pins(snapshot, extraction, extraction_hash):
         validation_profile="fast_preview",
         vision_status="not_run",
     )
+    if attribution is not None:
+        pins.update(
+            relation_attribution_policy=attribution,
+            relation_attribution_policy_sha256=canonical_hash(attribution),
+        )
     if snapshot.get("tagging_mode") == "upstage_local":
         pins.update(
             **{
@@ -144,6 +167,38 @@ def tag_pins(snapshot, extraction, extraction_hash):
         )
     ):
         raise ValueError("TAG_CHECKPOINT_PIN_MISMATCH")
+    from proofops.application.tagging.decisions import validate_decision_snapshot
+
+    validate_decision_snapshot(snapshot)
+    if "decision_settings" in snapshot:
+        pins.update(
+            {
+                key: snapshot[key]
+                for key in (
+                    "decision_settings",
+                    "decision_settings_hash",
+                    "decision_runtimes",
+                    "decision_runtime_hashes",
+                )
+            }
+        )
+    if "pipeline_profile" in snapshot:
+        pins["pipeline_profile"] = snapshot["pipeline_profile"]
+        if snapshot["pipeline_profile"] in ("finals-unattended-v1", "finals-unattended-v2"):
+            from proofops.application.analysis_profile import policy_for
+
+            policy = policy_for(
+                snapshot["pipeline_profile"],
+                pinned_hash=snapshot.get("analysis_profile_policy_sha256"),
+            )
+            policy_hash = canonical_hash(policy)
+
+            if (
+                snapshot.get("analysis_profile_policy") != policy
+                or snapshot.get("analysis_profile_policy_sha256") != policy_hash
+            ):
+                raise ValueError("ANALYSIS_PROFILE_PIN_MISMATCH")
+            pins["analysis_profile_policy_sha256"] = policy_hash
     if "fact_assembly_profile" in snapshot:
         pins["fact_assembly_profile"] = snapshot["fact_assembly_profile"]
     if "report_level_link" in snapshot:
@@ -165,6 +220,11 @@ def validate_tag_commit(db, jobs, run, message, envelope, next_job):
     extraction = json.loads(raw)
     expected = tag_pins(snapshot, extraction, ref["sha256"])
     claims = envelope["claims"]
+    unattended = snapshot.get("pipeline_profile") in (
+        "unattended-v1",
+        "finals-unattended-v1",
+        "finals-unattended-v2",
+    )
     original_ids = [c["claim_id"] for c in extraction["discovery"]["claims"]]
     decided = sum(
         item["decision"] is not None and item["decision"]["decision_status"] == "decided"
@@ -190,12 +250,24 @@ def validate_tag_commit(db, jobs, run, message, envelope, next_job):
         or envelope["coverage"] != coverage
         or envelope["stage_status"] not in {"blocked", "needs_review", "completed"}
         or envelope["downstream_status"] != "human_review"
-        or any(item["tag_runs"] and item.get("review_inputs") is None for item in claims)
+        or (
+            not unattended
+            and any(item["tag_runs"] and item.get("review_inputs") is None for item in claims)
+        )
         or any(not item["tag_runs"] and item["decision"] is not None for item in claims)
     ):
         raise ValueError("TAG_CHECKPOINT_INVALID")
     # Only the caller holding this same transaction's fence can publish revisions.
     for item in claims:
+        if unattended:
+            if (
+                item.get("decision") is not None
+                or item.get("review_inputs") is not None
+                or item.get("provisional_grade", {}).get("decision_status") != "provisional"
+                or item.get("source_status", {}).get("status") not in {"verified", "unverified"}
+            ):
+                raise ValueError("UNATTENDED_CHECKPOINT_INVALID")
+            continue
         if item["tag_runs"]:
             review = item["review_inputs"]
             if (
@@ -229,10 +301,10 @@ def _stored_context_reader(
             raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH") from None
     else:
         tag = published_tag
-        if (
-            not isinstance(tag, dict)
-            or (tag.get("confirmed_tags") or {}).get("claim_id") != claim.claim_id
-        ):
+        if not isinstance(tag, dict):
+            raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH")
+        tag_claim = tag.get("confirmed_tags") or (tag.get("inputs") or {}).get("claim") or {}
+        if tag_claim.get("claim_id") != claim.claim_id:
             raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH")
 
     ref_hash = canonical_hash([dict(asdict(ref), verification_state="candidate") for ref in refs])
@@ -256,6 +328,21 @@ def _stored_context_reader(
             else (receipt.get("receipts") or {}).get("paragraph")
         )
         if paragraph is None and receipt.get("schema") == "context_source_attestation_v1":
+            if run_policy and run_policy.get("profile") in PAGE_OCR_PROFILES:
+                from proofops.adapters.local.claim_source_policies import claim_source_reader
+
+                table_span_policy = claim_source_reader(run_policy).table_span_policy
+
+                table = (receipt.get("receipts") or {}).get("table")
+                if (
+                    isinstance(table, dict)
+                    and table.get("run_id") == run_id
+                    and table.get("policy") == table_span_policy()
+                    and receipt.get("policy_hashes", {}).get("table")
+                    == canonical_hash(table_span_policy())
+                ):
+                    return receipt, run_policy, None
+                raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH")
             from proofops.adapters.local.claim_source_verification import claim_source_policy
 
             policy = claim_source_policy()
@@ -294,7 +381,11 @@ class LocalTagStore:
     def verify_context_sources(
         self, inputs, refs, *, replay_receipt=None, pinned_run_snapshot=None, published_tag=None
     ):
-        """Source-only supplementary span attestations; never mutate frozen inputs."""
+        """Publish under current policy, or replay an explicitly stored receipt.
+
+        Historical readers are selected only after storage and ref binding have
+        been checked. Frozen inputs and the saved receipt identity stay intact.
+        """
         from dataclasses import replace
 
         from proofops.adapters.local.claim_source_policies import attest_claims
@@ -344,9 +435,16 @@ class LocalTagStore:
                     published_tag=published_tag,
                 )
             if reader_policy is not None:
-                from proofops.adapters.local.claim_source_policies import claim_source_reader
+                from proofops.adapters.local.claim_source_policies import (
+                    claim_source_reader,
+                    publication_reader,
+                )
 
-                reader = claim_source_reader(reader_policy)
+                reader = (
+                    claim_source_reader(reader_policy)
+                    if stored_receipt is not None
+                    else publication_reader(reader_policy)
+                )
         elif replay_receipt is not None:
             raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH")
         if reader is None:
@@ -358,6 +456,18 @@ class LocalTagStore:
             raise ValueError("CONTEXT_SOURCE_MISMATCH")
 
         def attest_paragraphs(selected):
+            if reader_policy and reader_policy.get("profile") in PAGE_OCR_PROFILES:
+                for_run = reader.for_run
+
+                if stored_receipt is not None:
+                    saved = (stored_receipt.get("receipts") or {}).get("paragraph", stored_receipt)
+                    saved = {k: v for k, v in saved.items() if k != "reader_policy_sha256"}
+                    saved["artifact_sha256"] = canonical_hash(
+                        {k: v for k, v in saved.items() if k != "artifact_sha256"}
+                    )
+                    return for_run(run_id).recompute_claim_receipt(
+                        saved, graph, source, selected, tenant_id=claim.tenant_id
+                    )
             return attest_claims(
                 reader=reader,
                 graph=graph,
@@ -365,6 +475,7 @@ class LocalTagStore:
                 refs=selected,
                 tenant_id=claim.tenant_id,
                 cache=False,
+                run_id=run_id,
             )
 
         kinds = {block.source_id: block.kind for block in graph.blocks}
@@ -380,6 +491,18 @@ class LocalTagStore:
         )
         paragraphs = tuple(ref for ref in unresolved if kinds[ref.source_id] == "paragraph")
         tables = tuple(ref for ref in unresolved if kinds[ref.source_id] != "paragraph")
+        if reader_policy and reader_policy.get("profile") in PAGE_OCR_PROFILES:
+            page_reader = reader.for_run(run_id)
+            table_span_policy = reader.table_span_policy
+            if stored_receipt is not None:
+                saved_table = (stored_receipt.get("receipts") or {}).get("table")
+
+                def attest_table_spans(graph, source, selected, *, tenant_id):
+                    return page_reader.recompute_table_span_receipt(
+                        saved_table, graph, source, selected, tenant_id=tenant_id
+                    )
+            else:
+                attest_table_spans = page_reader.attest_table_spans
         if tables:
             paragraph_receipt = attest_paragraphs(paragraphs) if paragraphs else None
             table_receipt = attest_table_spans(graph, source, tables, tenant_id=claim.tenant_id)
@@ -433,8 +556,18 @@ class LocalTagStore:
             record["status"] != "verified" for record in receipt["records"]
         ):
             raise ValueError("CONTEXT_SOURCE_REJECTED")
-        if stored_receipt is not None and canonical_hash(receipt) != canonical_hash(stored_receipt):
-            raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH")
+        if stored_receipt is not None:
+            from proofops.adapters.local.receipt_environment_compat import (
+                compare_receipts,
+                read_profile,
+            )
+
+            try:
+                compare_receipts(stored_receipt, receipt, profile=read_profile())
+            except ValueError:
+                raise ValueError("CONTEXT_SOURCE_REPLAY_MISMATCH") from None
+            # Historical supplemental span identity is part of the frozen tag.
+            receipt = stored_receipt
         scoped = span_verified_graph(
             graph,
             (
@@ -450,6 +583,32 @@ class LocalTagStore:
         )
         return scoped, receipt
 
+    def _facility_evidence(self, evidence, snapshot, tenant_id):
+        extraction, discovery, graph = evidence
+        policy = snapshot.get("analysis_profile_policy", {})
+        if policy.get("facility_tagging_candidates") is not None:
+            from proofops.adapters.local.k6_facilities import facility_graph
+
+            graph, _ = facility_graph(
+                graph,
+                self.uploads.read_original(tenant_id, graph.document_version_id),
+                discovery.claims,
+                tenant_id=tenant_id,
+                policy=policy,
+            )
+        if policy.get("local_implementation_binding_policy"):
+            from proofops.adapters.local.k9_scope_sources import scope_graph
+
+            graph, _ = scope_graph(
+                graph,
+                self.uploads.read_original(tenant_id, graph.document_version_id),
+                discovery.claims,
+                tenant_id=tenant_id,
+                run_id=snapshot["run_id"],
+                policy=policy,
+            )
+        return extraction, discovery, graph
+
     def _load_snapshot_with_evidence(self, tenant_id, run_id):
         # Share the evidence replay used to verify the tag checkpoint pins.
         run = self.store.jobs.get_run(tenant_id, run_id)
@@ -461,9 +620,79 @@ class LocalTagStore:
         evidence = self.claims.load_evidence(tenant_id, run_id)
         extraction = evidence[0]
         snapshot = self.store.snapshot(tenant_id, run_id)
+        evidence = self._facility_evidence(evidence, snapshot, tenant_id)
         expected = tag_pins(snapshot, extraction, run["claim_snapshot_sha256"])
         if any(envelope.get(k) != v for k, v in expected.items()):
             raise ValueError("TAG_CHECKPOINT_PIN_MISMATCH")
+        sc1_policy = snapshot.get("analysis_profile_policy", {}).get("sc1_scope_confirmation")
+        if sc1_policy is not None:
+            from proofops.application.tagging.analysis_scope import InventoryIndex, analyze_record
+            from proofops.application.tagging.v1_activity_links import policy_from_profile
+
+            inventory = envelope.get("sc1_inventory")
+            index = InventoryIndex(inventory, evidence[2]) if inventory is not None else None
+            if index is not None:
+                from proofops.application.tagging.element_inventory import selection_from_snapshot
+
+                if index.inventory["selection"] != selection_from_snapshot(
+                    snapshot, evidence[2], run_id
+                ):
+                    raise ValueError("SC1_INVENTORY_SELECTION_MISMATCH")
+            claims = {c.claim_id: c for c in evidence[1].claims}
+            pack = RulePackSnapshot(**snapshot["rulepack"])
+            for item in envelope["claims"]:
+                receipt = item.get("sc1_scope_receipt")
+                if receipt is not None:
+                    if index is None:
+                        raise ValueError("SC1_INVENTORY_MISSING")
+                    replayed = analyze_record(
+                        item,
+                        claims[item["claim_id"]],
+                        evidence[2],
+                        pack,
+                        index,
+                        required_present_votes=sc1_policy["agreement"]["required_present_votes"],
+                        local_synthetic=envelope["synthetic"],
+                        grade_agreement_policy=snapshot.get("analysis_profile_policy", {}).get(
+                            "grade_required_agreement_policy"
+                        ),
+                        v1_activity_policy=policy_from_profile(
+                            snapshot.get("analysis_profile_policy", {})
+                        ),
+                    )
+                    if canonical_hash(replayed) != canonical_hash(receipt) or any(
+                        item.get(k) != receipt[k] for k in ("sc1_confirmation", "sc1_elements")
+                    ):
+                        raise ValueError("SC1_SCOPE_RECEIPT_MISMATCH")
+                elif item.get("sc1_confirmation") is not None:
+                    raise ValueError("SC1_CONFIRMATION_WITHOUT_RECEIPT")
+        elif "sc1_inventory" in envelope or any(
+            item.get("sc1_confirmation") for item in envelope["claims"]
+        ):
+            raise ValueError("SC1_UNPINNED_CONFIRMATION")
+        cf6_policy = snapshot.get("analysis_profile_policy", {}).get("cf6_confirmation")
+        for item in envelope["claims"]:
+            receipt = item.get("cf6_receipt")
+            if receipt is not None:
+                if cf6_policy is None:
+                    raise ValueError("CF6_UNPINNED_CONFIRMATION")
+                from proofops.application.tagging.cf6_confirmation import analyze_record
+
+                claim = next(c for c in evidence[1].claims if c.claim_id == item["claim_id"])
+                replayed = analyze_record(
+                    item,
+                    claim,
+                    evidence[2],
+                    RulePackSnapshot(**snapshot["rulepack"]),
+                    snapshot["analysis_profile_policy"],
+                )
+                if (
+                    canonical_hash(replayed) != canonical_hash(receipt)
+                    or item.get("cf6_confirmation") != replayed["cf6_confirmation"]
+                ):
+                    raise ValueError("CF6_RECEIPT_MISMATCH")
+            elif item.get("cf6_confirmation") is not None:
+                raise ValueError("CF6_CONFIRMATION_WITHOUT_RECEIPT")
         return envelope, evidence
 
     def load_snapshot(self, tenant_id, run_id):
@@ -498,7 +727,11 @@ class LocalTagStore:
                 raise KeyError("tagged claim not published") from None
             raw = published.get("inputs")
             snapshot = self.store.snapshot(tenant_id, run_id)
-            expected = tag_pins(snapshot, evidence[0], run["claim_snapshot_sha256"])
+            evidence = self._facility_evidence(evidence, snapshot, tenant_id)
+            graph = evidence[2]
+            # Keep snapshot-policy validation from the checkpoint path. Its
+            # extraction graph pin is distinct from the attested graph below.
+            tag_pins(snapshot, evidence[0], run["claim_snapshot_sha256"])
             if (
                 published.get("origin") != "consensus"
                 or published.get("tag_revision") != 1
@@ -506,7 +739,9 @@ class LocalTagStore:
                 or not isinstance(raw, dict)
                 or canonical_hash(raw.get("claim")) != canonical_hash(asdict(claim))
                 or raw.get("run_id") != run_id
-                or raw.get("original", {}).get("graph_sha256") != expected["graph_sha256"]
+                # Extraction pins precede source attestation. Partial publications
+                # bind to the same verified graph used by normal checkpoint replay.
+                or raw.get("original", {}).get("graph_sha256") != canonical_hash(asdict(graph))
                 or canonical_hash(raw.get("rulepack")) != canonical_hash(snapshot["rulepack"])
             ):
                 raise ValueError("TAG_REPLAY_MISMATCH")
@@ -604,13 +839,37 @@ class LocalTagStore:
             raw.get("fact_assembly", {}).get("profile", "strict-v1"),
             link_config,
             link_receipts,
+            _fact_assembly_reader(raw.get("fact_assembly_receipt")),
         )
         inputs.validate()
+        if _tag_replay_hash(inputs.snapshot()) != _tag_replay_hash(raw):
+            raise ValueError("TAG_REPLAY_MISMATCH")
         for receipt in link_receipts:
             refs = tuple(SourceRef(**ref) for ref in receipt["refs"])
-            _, replayed = self.verify_context_sources(inputs, refs)
+            # raw came from the hash/pin-checked checkpoint or initial immutable
+            # revision above, and its complete replay has now been validated.
+            # Bind to that publication rather than a potentially newer tag head.
+            _, replayed = self.verify_context_sources(
+                inputs,
+                refs,
+                replay_receipt=receipt["source_receipt"],
+                pinned_run_snapshot=snapshot,
+                published_tag=dict(inputs=raw, report_level_review=link_receipts),
+            )
             if canonical_hash(replayed) != canonical_hash(receipt["source_receipt"]):
                 raise ValueError("REPORT_LEVEL_LINK_REPLAY_MISMATCH")
-        if canonical_hash(inputs.snapshot()) != canonical_hash(raw):
-            raise ValueError("TAG_REPLAY_MISMATCH")
         return inputs
+
+
+def _fact_assembly_reader(raw):
+    """Opaque versioned artifact; replay remains ReviewInputs' responsibility."""
+    if raw is None:
+        return None
+    from proofops.application.tagging.fact_assembly_c2 import SCHEMA, FactAssemblyReceiptV1
+
+    if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
+        raise ValueError("FACT_ASSEMBLY_VERSION_UNSUPPORTED")
+    content = {k: v for k, v in raw.items() if k != "receipt_sha256"}
+    return FactAssemblyReceiptV1(
+        json.dumps(content, ensure_ascii=False, sort_keys=True), raw["receipt_sha256"]
+    )

@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from evaluation.reconciliation_cli import main
-from evaluation.reconciliation_fixtures import EXAMPLES, build_case, canonical_hash
+from tests.support.reconciliation_cli import main
+from tests.support.reconciliation_fixtures import EXAMPLES, build_case, canonical_hash
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = sorted(p.stem for p in EXAMPLES.glob("*.json"))
@@ -210,7 +210,7 @@ def test_cli_roundtrip_and_c5_dispatch(tmp_path):
 
 def _c3_commitment_bundle(tmp_path, monkeypatch, *, mapping_approved=True):
     """Fixture c3-policy-unresolved plus one registered, verified commitment note."""
-    import evaluation.reconciliation_fixtures as fixtures
+    import tests.support.reconciliation_fixtures as fixtures
 
     case = json.loads((EXAMPLES / "c3-policy-unresolved.json").read_text(encoding="utf-8"))
     case["input"]["sources"].append(

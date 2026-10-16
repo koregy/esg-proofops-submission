@@ -27,7 +27,7 @@ FOREIGN = "22222222-2222-4222-8222-222222222222"
 
 
 def test_cli_bounds_read_when_file_grows_after_metadata_check(tmp_path, monkeypatch):
-    from evaluation.cli import MAX_INPUT_BYTES, InputRejected, _load
+    from tests.support.cli import MAX_INPUT_BYTES, InputRejected, _load
 
     path = tmp_path / "growing.json"
     path.write_text("{}")
@@ -99,7 +99,7 @@ def _run_cli(database: Path, inputs: tuple[Path, Path, Path], *extra: str):
         [
             sys.executable,
             "-m",
-            "evaluation.cli",
+            "tests.support.cli",
             "--predictions",
             str(inputs[0]),
             "--gold",

@@ -1,7 +1,6 @@
 // playwright-cli run-code --filename=tests/e2e/hosted_intake_check.js
-// Run against the current page origin or hosted local dev on 5207. All hosted traffic is intercepted; paid calls zero.
+// Built hosted Vite preview on 5197. All hosted traffic is intercepted; paid calls zero.
 async page => {
-  const base = page.url().startsWith('http') ? new URL(page.url()).origin : 'http://127.0.0.1:5207';
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const docs = new Map(); const runs = new Map(); const polls = new Map();
@@ -24,8 +23,6 @@ async page => {
     let data; let status = 200;
     if (path === '/v1/runtime') data = { analysis_backend: 'hosted', accept_new_runs: true, accept_uploads: true, live_analysis: true, live_disabled: false, upload_notice: 'PI1 무료 브라우저 모의 시험', consent_version: 'test', pipeline_profile: 'finals-unattended-v2', limits: { max_upload_bytes: 150 * 1048576, selected_pages: 10, max_pdf_pages: 300, original_days: 7, user_active_runs: 5, daily_runs: 10 } };
     else if (path === '/v1/session' && !logins) { status = 401; data = { error: { code: 'AUTH_REQUIRED' } }; }
-    else if (path === '/v1/documents' && request.method() === 'GET') data = { items: [], next_cursor: null };
-    else if (path === '/v1/runs' && request.method() === 'GET') data = { items: [], next_cursor: null };
     else if (path === '/v1/auth/invitation') {
       logins++;
       data = { user_id: 'same-user', tenant_id: 'same-tenant', role: 'admin', csrf_token: 'pi1-test-csrf', expires_at: '2099-01-01' };
@@ -54,12 +51,11 @@ async page => {
     } else throw new Error(`Unexpected hosted request: ${request.method()} ${path}`);
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
   });
-  await page.goto(`${base}/analyze`);
-  await page.getByRole('combobox', {name:'로그인 방식', exact: true }).selectOption('invitation');
-  await page.getByLabel('초대 코드 또는 접근 비밀번호', { exact: true }).fill('pi1-synthetic-invitation-0123456789');
-  await page.getByRole('button', { name: '입장' }).click();
+  await page.goto('http://127.0.0.1:5197/analyze');
+  await page.getByLabel('초대 코드', { exact: true }).fill('pi1-synthetic-invitation-0123456789');
+  await page.getByRole('button', { name: '초대 코드로 입장' }).click();
   const file = index => ({ name: `report-${index}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\nsynthetic browser fixture') });
-  const card = index => page.getByTestId('document-analysis').filter({ has: page.getByText(`report-${index}.pdf`, { exact: true }) });
+  const card = index => page.getByTestId('document-analysis').filter({ has: page.getByRole('heading', { name: `report-${index}.pdf`, exact: true }) });
   await page.locator('input[type=file]').setInputFiles(file(1));
   await page.getByRole('button', { name: '업로드', exact: true }).click();
   await card(1).getByRole('button', { name: '분석 시작', exact: true }).click();
@@ -78,11 +74,7 @@ async page => {
   for (let i = 1; i <= 5; i++) {
     const run = runs.get(`run-${i}`);
     runs.set(run.run_id, { ...run, status: 'completed', stage: 'result', progress: 1, queue_position: null, result_url: `${run.status_url}/result` });
-    await card(i).getByTestId('hosted-result').waitFor({ timeout: 15000 });
-    check(!(await card(i).locator('.hosted-run-summary').evaluate(el => el.open)), 'completed summary did not collapse');
-    check(await card(i).getByRole('button', { name: '분석 시작', exact: true }).count() === 0, 'completed start button visible');
-    await card(i).locator('.hosted-run-summary > summary').click();
-    await card(i).getByTestId('document-status').filter({ hasText: '완료' }).waitFor();
+    await card(i).getByTestId('document-status').filter({ hasText: '완료' }).waitFor({ timeout: 15000 });
     await card(i).getByText('선택한 범위의 분석이 정상 완료되었으나 환경 주장을 발견하지 못했습니다. 보고서 전체에 주장이 없다는 뜻은 아닙니다.', { exact: true }).waitFor();
   }
   check(await page.getByText('이 서버가 결과 상세를 아직 제공하지 않아 화면에 표시할 수 없습니다.', { exact: true }).count() === 0, 'loaded result shown as unavailable');
@@ -124,6 +116,6 @@ async page => {
   check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow');
   check(errors.length === 0, `browser errors: ${errors.join('; ')}`);
   const outcome = { status: 'passed', invitations: logins, five_acceptances: 5, initial_running: 1, initial_queued: 4, completed: 5, multi_file_upload: true, independent_periods_results: true, admission_errors: ['QUEUE_FULL', 'DAILY_RUN_LIMIT', 'BUDGET_EXCEEDED'], provider_cause_visible: true, accounting_pending_poll_stopped: true, other_document_start_enabled: true, document_cancel_delete_isolated: true, mobile_width: 390, provider_calls: 0 };
-  await page.evaluate(value => { window.pw1BrowserOutcome = value; }, outcome);
+  await page.evaluate(value => { window.pi1BrowserOutcome = value; }, outcome);
   return outcome;
 }

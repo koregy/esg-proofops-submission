@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from evaluation import pipeline_recovery as recovery
-from evaluation.pipeline_recovery import build_manifest, write_idempotent_versioned
 from tests.acceptance.test_upload import pdf
+from tests.support import pipeline_recovery as recovery
+from tests.support.pipeline_recovery import build_manifest, write_idempotent_versioned
 
 
 @pytest.mark.skipif(

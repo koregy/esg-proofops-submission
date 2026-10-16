@@ -83,6 +83,6 @@ def test_real_release_run_executes_and_validates_all_eight_cli_cases(
     for check in cli_checks:
         detail = json.loads((output / check["evidence"]).read_text(encoding="utf-8"))
         assert detail["exit_code"] == 0
-        assert detail["command"][1:3] == ["-m", "evaluation.reconciliation_cli"]
+        assert detail["command"][1:3] == ["-m", "tests.support.reconciliation_cli"]
         assert detail["validation"]["schema"] == "passed"
         assert detail["validation"]["observed"] == detail["validation"]["expected"]

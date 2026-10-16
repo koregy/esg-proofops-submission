@@ -86,6 +86,9 @@ UPSTAGE_TRANSPORT_STOP_CODES = frozenset(
         "UPSTAGE_REQUEST_FAILED",
         "UPSTAGE_RECEIPT_INVALID_RESERVATION_RETAINED",
         "UPSTREAM_UNAVAILABLE",
+        "OPENAI_REQUEST_FAILED",
+        "OPENAI_RECEIPT_INVALID_RESERVATION_RETAINED",
+        *(f"OPENAI_HTTP_{n}" for n in (400, 401, 403, 404, 429, 500, 502, 503)),
         "OPENROUTER_REQUEST_FAILED",
         "OPENROUTER_RECEIPT_INVALID_RESERVATION_RETAINED",
         *(f"OPENROUTER_HTTP_{n}" for n in (400, 401, 403, 404, 429, 500, 502, 503)),
@@ -128,11 +131,32 @@ def request_usage(ledger, request_ids) -> dict:
         uri = Path(ledger).resolve().as_uri() + "?mode=ro"
         entries = []
         with sqlite3.connect(uri, uri=True) as db:
-            for identifier in identifiers:
-                row = db.execute(
-                    "SELECT committed, receipt FROM probe_calls WHERE request_id=?",
-                    (identifier,),
-                ).fetchone()
+            if all(isinstance(identifier, str) for identifier in identifiers):
+                rows: dict[str, tuple[str, str | None]] = {}
+                # Keep below SQLite's portable bind limit. Read fresh rows each
+                # time; never cache settlement or hide a pending reservation.
+                for offset in range(0, len(identifiers), 500):
+                    window = identifiers[offset : offset + 500]
+                    parameters = ",".join("?" for _ in window)
+                    rows.update(
+                        (key, (amount, receipt))
+                        for key, amount, receipt in db.execute(
+                            "SELECT request_id, committed, receipt FROM probe_calls "
+                            f"WHERE request_id IN ({parameters})",
+                            window,
+                        )
+                    )
+                ordered = [rows.get(identifier) for identifier in identifiers]
+            else:
+                # Historical callers' SQLite coercion remains unchanged.
+                ordered = [
+                    db.execute(
+                        "SELECT committed, receipt FROM probe_calls WHERE request_id=?",
+                        (identifier,),
+                    ).fetchone()
+                    for identifier in identifiers
+                ]
+            for row in ordered:
                 if row is not None:
                     amount = Decimal(row[0])
                     if not amount.is_finite() or amount < 0:
@@ -203,6 +227,11 @@ def request_usage(ledger, request_ids) -> dict:
     }
     if has_parse_receipt:
         result["document_parse_pages"] = document_parse_pages
+    reuses = [r["response_reuse"] for r in settled if "response_reuse" in r]
+    if reuses:
+        result["model_response_reuses"] = len(reuses)
+        result["model_response_reuse_origins"] = reuses
+        result["provider_dispatches"] = len(entries) - len(reuses)
     return result
 
 
@@ -308,7 +337,9 @@ class UpstageProbe:
     @staticmethod
     def _call_total(db) -> Decimal:
         total = Decimal(0)
-        for raw, receipt in db.execute("SELECT committed, receipt FROM probe_calls"):
+        for request_id, signature, raw, receipt in db.execute(
+            "SELECT request_id,signature,committed,receipt FROM probe_calls"
+        ):
             try:
                 amount = Decimal(raw)
                 if (
@@ -319,7 +350,34 @@ class UpstageProbe:
                     raise ValueError
                 if receipt is None:
                     if amount != Decimal(POLICY["reservation_usd"]):
-                        raise ValueError
+                        # New async parser reservations use exact, pinned page rates.
+                        # Historical unreceipted USD1 rows remain unchanged.
+                        if not db.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' "
+                            "AND name='parse_reservations'"
+                        ).fetchone():
+                            raise ValueError
+                        row = db.execute(
+                            "SELECT bound,body FROM parse_reservations WHERE request_id=?",
+                            (request_id,),
+                        ).fetchone()
+                        body = json.loads(row[1]) if row else {}
+                        if (
+                            row is None
+                            or Decimal(row[0]) != amount
+                            or amount <= 0
+                            or not isinstance(body, dict)
+                            or canonical_hash(body) != signature
+                            or body.get("model") != "document-parse-260128"
+                            or body.get("transport") != "async"
+                            or type(body.get("pages")) is not int
+                            or not 1 <= body["pages"] <= 1000
+                            or body.get("mode") not in {"standard", "enhanced"}
+                            or amount
+                            != body["pages"]
+                            * Decimal(".011" if body["mode"] == "standard" else ".033")
+                        ):
+                            raise ValueError
                 else:
                     parsed = json.loads(receipt)
                     if not isinstance(parsed, dict):
@@ -350,6 +408,25 @@ class UpstageProbe:
                     ):
                         raise ValueError
                 except (InvalidOperation, KeyError, TypeError, ValueError):
+                    raise ValueError("BUDGET_LEDGER_INVALID") from None
+                total += amount
+        # Page OCR has an exact one-page reservation, including uncertain calls.
+        # Include it in every existing transport's shared-provider ceiling.
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ocr_calls'"
+        ).fetchone():
+            for raw, state, collection in db.execute(
+                "SELECT committed,state,collection FROM ocr_calls"
+            ):
+                try:
+                    amount = Decimal(raw)
+                    if (
+                        amount != Decimal("0.00165")
+                        or state not in {"pending", "failed", "collected"}
+                        or (state == "collected") != (collection is not None)
+                    ):
+                        raise ValueError
+                except (InvalidOperation, TypeError, ValueError):
                     raise ValueError("BUDGET_LEDGER_INVALID") from None
                 total += amount
         return total

@@ -1,0 +1,222 @@
+{
+  "APP_ENV": {
+    "default": "local",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "APP_ORIGIN": {
+    "default": "http://localhost:5173",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "API_PUBLIC_BASE_URL": {
+    "default": "http://localhost:8000",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "AWS_REGION": {
+    "default": "ap-northeast-2",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "AWS_PROFILE": {
+    "default": "",
+    "requirement": "no",
+    "environments": "local"
+  },
+  "S3_ARTIFACT_BUCKET": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "S3_QUARANTINE_BUCKET": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "DDB_CORE_TABLE": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "DDB_AUDIT_TABLE": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "SQS_JOB_QUEUE_URL": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "SQS_DLQ_URL": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "KMS_KEY_ARN": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "OPENSEARCH_ENDPOINT": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "OPENSEARCH_INDEX_GENERATION": {
+    "default": "proofops-chunks-v1",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "COGNITO_USER_POOL_ID": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "COGNITO_CLIENT_ID": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "COGNITO_DOMAIN": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "SESSION_SECRET_ARN": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "CURSOR_SECRET_ARN": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "AGENTCORE_RUNTIME_ARN": {
+    "default": "",
+    "requirement": "cloud",
+    "environments": "staging/production"
+  },
+  "MODEL_BINDINGS_PATH": {
+    "default": "config/model_bindings.json",
+    "requirement": "live",
+    "environments": "all"
+  },
+  "CONSENT_PROFILE_PATH": {
+    "default": "config/consent_profile.json",
+    "requirement": "live",
+    "environments": "all"
+  },
+  "RULE_PACK_PATH": {
+    "default": "config/rule_pack_manifest.yaml",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "PARSER_PROFILE_PATH": {
+    "default": "config/parsing.yaml",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "LIMITS_PATH": {
+    "default": "config/limits.yaml",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "LOCAL_ARTIFACT_DIR": {
+    "default": ".local/artifacts",
+    "requirement": "local",
+    "environments": "local"
+  },
+  "LOCAL_DATABASE_PATH": {
+    "default": ".local/state.sqlite3",
+    "requirement": "local",
+    "environments": "local"
+  },
+  "MODEL_ADAPTER": {
+    "default": "synthetic",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "ENABLE_HYBRID_PARSER": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "HYBRID_BACKEND_URL": {
+    "default": "",
+    "requirement": "hybrid",
+    "environments": "all"
+  },
+  "ENABLE_LEGACY_PYMUPDF": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "ENABLE_AGENTCORE_MEMORY": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "ENABLE_ADVERTISING_MODE": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "ENABLE_YEAR_COMPARISON": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "ALLOW_LIVE_MODEL_TESTS": {
+    "default": "false",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "OTEL_SERVICE_NAME": {
+    "default": "proofops-local",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "LOG_LEVEL": {
+    "default": "INFO",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "RETENTION_POLICY_PATH": {
+    "default": "config/retention.yaml",
+    "requirement": "yes",
+    "environments": "all"
+  },
+  "LOCAL_PARSER_PROFILE_PATH": {
+    "default": "",
+    "requirement": "local parser execution",
+    "environments": "local"
+  },
+  "LOCAL_RUN_SETTINGS_PATH": {
+    "default": "",
+    "requirement": "local configured run creation",
+    "environments": "local"
+  },
+  "LOCAL_EXTRACTION_MODE": {
+    "default": "",
+    "requirement": "local extraction execution",
+    "environments": "local"
+  },
+  "LOCAL_TAGGING_MODE": {
+    "default": "",
+    "requirement": "local tagging execution",
+    "environments": "local"
+  },
+  "VITE_API_BASE_URL": {
+    "default": "",
+    "requirement": "no",
+    "environments": "web build"
+  },
+  "VITE_UPLOAD_ORIGIN": {
+    "default": "",
+    "requirement": "external upload",
+    "environments": "web build"
+  }
+}

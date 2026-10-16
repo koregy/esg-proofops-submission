@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from evaluation import cross_report_probe as probe
+from tests.support import cross_report_probe as probe
 
 
 @pytest.mark.parametrize(

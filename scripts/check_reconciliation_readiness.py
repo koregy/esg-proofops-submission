@@ -63,7 +63,7 @@ SECRET_NAME = re.compile(r"KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|ARN", re.IGNOREC
 UNREAD_ENV_FILES = (".env", ".env.local", ".env.dart.local", ".env.production")
 
 ENV_EXAMPLE = ".env.example"
-ENV_DOC = "docs/17_ENV_CONFIG.md"
+ENV_DOC = "contracts/runtime_environment.json"
 CI_WORKFLOW = ".github/workflows/ci.yml"
 
 REQUIRED_PATHS = (
@@ -81,9 +81,8 @@ REQUIRED_PATHS = (
     "contracts/reconciliation/input.schema.json",
     "contracts/reconciliation/policy.schema.json",
     "contracts/reconciliation/product.openapi.yaml",
-    "evaluation/reconciliation_import.py",
+    "tests/support/reconciliation_import.py",
     "scripts/verify_reconciliation.py",
-    "docs/RECONCILIATION_PRODUCT_CONTRACT.md",
     ENV_EXAMPLE,
     ENV_DOC,
     CI_WORKFLOW,
@@ -274,23 +273,9 @@ class DocumentedVariable:
 
 
 def parse_env_doc(path: Path) -> dict[str, DocumentedVariable]:
-    """Read the variable contract table out of the environment specification."""
-    documented: dict[str, DocumentedVariable] = {}
-    row = re.compile(r"^\|\s*`([A-Z0-9_]+)`\s*\|(.*)$")
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = row.match(line.strip())
-        if match is None:
-            continue
-        cells = [cell.strip().strip("`") for cell in match.group(2).split("|")]
-        if len(cells) < 3:
-            continue
-        documented[match.group(1)] = DocumentedVariable(
-            name=match.group(1),
-            default="" if cells[0] in ("빈 값", "") else cells[0],
-            requirement=cells[1],
-            environments=cells[2],
-        )
-    return documented
+    """Read the machine-readable environment contract."""
+    values = json.loads(path.read_text(encoding="utf-8"))
+    return {name: DocumentedVariable(name=name, **fields) for name, fields in values.items()}
 
 
 def parse_ci_pins(path: Path) -> dict[str, str]:
@@ -920,7 +905,7 @@ class ReadinessChecker:
         entry = str(self.root)
         if entry not in sys.path:
             sys.path.insert(0, entry)
-        from evaluation.reconciliation_fixtures import build_case
+        from tests.support.reconciliation_fixtures import build_case
 
         bundle = build_case("c1-difference-no-explanation", workspace / "fixture")
         packet, policy, documents, artifacts, coverage = store._validate_bundle(bundle)

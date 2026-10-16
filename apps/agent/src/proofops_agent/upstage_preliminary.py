@@ -28,11 +28,17 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from proofops.adapters.local.openrouter import OpenRouterProbe
 from proofops.adapters.local.upstage import UpstageProbe
 from proofops.application.preflight import Preflight
+from proofops.application.tagging.cf5_context import PRELIMINARY as CF5_PRELIMINARY
+from proofops.application.tagging.cf5_context import preliminary as preliminary_cf5
+from proofops.application.tagging.cf5_context import validate_packet as validate_cf5_packet
+from proofops.application.tagging.pb1_classification import COMPACT_PROFILE, COMPACT_PROMPT
+from proofops.application.tagging.pb1_classification import SYSTEM_SUFFIX as PB1_SUFFIX
 from proofops.application.tagging.preliminary import (
     ACTOR_ROLE_SYSTEM_SUFFIX,
     CONTEXT_POSITION_ORDER,
@@ -43,6 +49,11 @@ from proofops.application.tagging.preliminary import (
     P2_SYSTEM_PROMPT,
     PERIOD_ROLE_SYSTEM_SUFFIX,
     SCHEMA,
+    SENTENCE_CONTEXT_PROFILE,
+    SENTENCE_CONTEXT_SYSTEM_PROMPT,
+    SENTENCE_FALLBACK_BASE_PROMPT,
+    SENTENCE_FALLBACK_PROFILE,
+    SENTENCE_FALLBACK_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     TABLE_ROLE_SYSTEM_SUFFIX,
     TABLE_SCHEMA,
@@ -68,6 +79,7 @@ POSITION_P2_MODEL_PROFILE = "upstage-preliminary-source-quotes-table-role-v2-p2-
 # the table-role prompt. Requires preliminary_table_role=True and its dependencies.
 GOAL_ROLE_MODEL_PROFILE = "upstage-preliminary-source-quotes-goal-role-v1"
 ACTOR_ROLE_MODEL_PROFILE = "upstage-preliminary-source-quotes-actor-role-v1"
+PB1_MODEL_PROFILE = "upstage-preliminary-source-quotes-actor-role-v3-pb1"
 ACTOR_ROLE_MODEL_PROFILE_V2 = "upstage-preliminary-source-quotes-actor-role-v2"
 TRANSPORT_VERSION = "preliminary-source-quotes-v1"
 CONTEXT_TRANSPORT_VERSION = "preliminary-source-quotes-context-v1"
@@ -88,6 +100,8 @@ TABLE_ROLE_SYSTEM_PROMPT = TABLE_SYSTEM_PROMPT + TABLE_ROLE_SYSTEM_SUFFIX
 GOAL_ROLE_SYSTEM_PROMPT = TABLE_ROLE_SYSTEM_PROMPT + GOAL_ROLE_SYSTEM_SUFFIX
 ACTOR_ROLE_SYSTEM_PROMPT = GOAL_ROLE_SYSTEM_PROMPT + ACTOR_ROLE_SYSTEM_SUFFIX
 ACTOR_ROLE_SYSTEM_PROMPT_V2 = ACTOR_ROLE_SYSTEM_PROMPT + PERIOD_ROLE_SYSTEM_SUFFIX
+
+PB1_SYSTEM_PROMPT = ACTOR_ROLE_SYSTEM_PROMPT_V2 + PB1_SUFFIX
 
 _ENVELOPE_KEYS = frozenset(
     (
@@ -160,13 +174,22 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
         tenant_id,
         authorize,
         resume=None,
+        display_catalog=None,
     ):
         _require_uuid("tenant_id", tenant_id)
-        if settings.model_profile in (P2_MODEL_PROFILE, POSITION_P2_MODEL_PROFILE):
+        if settings.model_profile == SENTENCE_FALLBACK_PROFILE:
+            expected_prompt = SENTENCE_FALLBACK_SYSTEM_PROMPT
+        elif settings.model_profile == SENTENCE_CONTEXT_PROFILE:
+            expected_prompt = SENTENCE_CONTEXT_SYSTEM_PROMPT
+        elif settings.model_profile in (P2_MODEL_PROFILE, POSITION_P2_MODEL_PROFILE):
             expected_prompt = P2_SYSTEM_PROMPT
         elif settings.model_profile == P1_MODEL_PROFILE:
             expected_prompt = P1_SYSTEM_PROMPT
-        elif settings.model_profile == ACTOR_ROLE_MODEL_PROFILE_V2:
+        elif settings.model_profile == COMPACT_PROFILE:
+            expected_prompt = COMPACT_PROMPT
+        elif settings.model_profile == PB1_MODEL_PROFILE:
+            expected_prompt = PB1_SYSTEM_PROMPT
+        elif settings.model_profile in (ACTOR_ROLE_MODEL_PROFILE_V2, "preliminary-decision-v1"):
             expected_prompt = ACTOR_ROLE_SYSTEM_PROMPT_V2
         elif settings.model_profile == ACTOR_ROLE_MODEL_PROFILE:
             expected_prompt = ACTOR_ROLE_SYSTEM_PROMPT
@@ -185,6 +208,22 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
             expected_prompt = SYSTEM_PROMPT
         else:
             raise ValueError("UPSTAGE_TAGGING_BINDING_INVALID")
+        if settings.model_profile == COMPACT_PROFILE:
+            from proofops.application.tagging.finals_i4 import K4_PRELIMINARY
+            from proofops.application.tagging.k1_semantics import GUIDANCE
+            from proofops.application.tagging.k9_contract import PRELIMINARY as K9_PRELIMINARY
+            from proofops.application.tagging.q1_contract import PRELIMINARY as Q1_PRELIMINARY
+            from proofops.application.tagging.v3_dec92 import PRELIMINARY as V3_PRELIMINARY
+
+            if settings.system_prompt in (
+                expected_prompt + "\n" + GUIDANCE,
+                K4_PRELIMINARY,
+                K9_PRELIMINARY,
+                Q1_PRELIMINARY,
+                V3_PRELIMINARY,
+                CF5_PRELIMINARY,
+            ):
+                expected_prompt = settings.system_prompt
         if (
             not isinstance(probe, self._probe_type())
             or not isinstance(settings, TaggingSettings)
@@ -202,7 +241,11 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
             raise ValueError("UPSTAGE_TAGGING_AUTHORIZER_REQUIRED")
         if resume is not None and not isinstance(resume, TransportResume):
             raise ValueError("UPSTAGE_TAGGING_RESUME_INVALID")
-        if settings.model_profile == POSITION_P2_MODEL_PROFILE:
+        if settings.model_profile == SENTENCE_FALLBACK_PROFILE:
+            self.TRANSPORT_VERSION = "preliminary-source-quotes-sentence-fallback-v1"
+        elif settings.model_profile == SENTENCE_CONTEXT_PROFILE:
+            self.TRANSPORT_VERSION = "preliminary-source-quotes-sentence-context-v1"
+        elif settings.model_profile == POSITION_P2_MODEL_PROFILE:
             self.TRANSPORT_VERSION = POSITION_P2_TRANSPORT_VERSION
         elif settings.model_profile == POSITION_TABLE_ROLE_MODEL_PROFILE:
             self.TRANSPORT_VERSION = POSITION_TABLE_ROLE_TRANSPORT_VERSION
@@ -216,12 +259,21 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
             self.TRANSPORT_VERSION = TABLE_TRANSPORT_VERSION
         elif settings.model_profile == TABLE_ROLE_MODEL_PROFILE:
             self.TRANSPORT_VERSION = TABLE_ROLE_TRANSPORT_VERSION
-        elif settings.model_profile == ACTOR_ROLE_MODEL_PROFILE_V2:
-            self.TRANSPORT_VERSION = ACTOR_ROLE_TRANSPORT_VERSION_V2
+        elif settings.model_profile == COMPACT_PROFILE:
+            self.TRANSPORT_VERSION = COMPACT_PROFILE
+        elif settings.model_profile == PB1_MODEL_PROFILE:
+            self.TRANSPORT_VERSION = PB1_MODEL_PROFILE
+        elif settings.model_profile in (ACTOR_ROLE_MODEL_PROFILE_V2, "preliminary-decision-v1"):
+            self.TRANSPORT_VERSION = (
+                "preliminary-decision-v1"
+                if settings.model_profile == "preliminary-decision-v1"
+                else ACTOR_ROLE_TRANSPORT_VERSION_V2
+            )
         elif settings.model_profile == ACTOR_ROLE_MODEL_PROFILE:
             self.TRANSPORT_VERSION = ACTOR_ROLE_TRANSPORT_VERSION
         elif settings.model_profile == GOAL_ROLE_MODEL_PROFILE:
             self.TRANSPORT_VERSION = GOAL_ROLE_TRANSPORT_VERSION
+        self._display_catalog = display_catalog
         self._authorize = authorize
         self._probe, self._settings, self._tenant = probe, settings, tenant_id
         self._resume = resume
@@ -242,14 +294,28 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
         frozen packet, so all replicas and receipts describe exactly the same
         bounded input. An oversized sources-only packet still fails normally.
         """
+        if self._settings.system_prompt == CF5_PRELIMINARY:
+            validate_cf5_packet(packet)
+            return deepcopy(packet)
         bounded = deepcopy(packet)
         data = bounded["untrusted_document_data"]
         blocks = data.get("context_blocks", [])
         while blocks:
-            wire = json.dumps(bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            sizing = bounded
+            system = self._settings.rendered_system
+            if getattr(self, "_display_catalog", None) is not None:
+                from proofops.application.ingest.display_text import POLICY, SYSTEM_SUFFIX
+
+                # Pins are added after context bounding. The wire drops those
+                # pins and adds this fixed policy/hash/suffix; account for that
+                # overhead now. Raw text is an upper bound on display text, which
+                # only deletes proven spaces. No numbered source is shortened.
+                sizing = bounded | dict(display_policy=POLICY, display_map_sha256="0" * 64)
+                system += SYSTEM_SUFFIX
+            wire = json.dumps(sizing, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             try:
                 self._probe.request_body(
-                    self._settings.rendered_system,
+                    system,
                     wire,
                     request_id="context-size-preflight",
                     max_tokens=self._settings.max_tokens,
@@ -267,7 +333,22 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
 
     def _wire_request(self, request: dict) -> tuple[str, str, dict[str, dict], Preflight, str]:
         settings = self._settings
-        actor_role_v2 = settings.model_profile == ACTOR_ROLE_MODEL_PROFILE_V2
+        fallback = settings.model_profile == SENTENCE_FALLBACK_PROFILE
+        # The authorized fallback profile has exactly two pinned wire branches.
+        # The packet prompt hash chooses a branch; keys and context are checked below.
+        try:
+            fallback_sources = fallback and json.loads(request["user_json"])[
+                "prompt_sha256"
+            ] == canonical_hash(SENTENCE_FALLBACK_BASE_PROMPT)
+        except (ValueError, TypeError, KeyError):
+            raise ValueError("UPSTAGE_PRELIMINARY_PACKET_INVALID") from None
+        actor_role_v2 = settings.model_profile in (
+            ACTOR_ROLE_MODEL_PROFILE_V2,
+            PB1_MODEL_PROFILE,
+            COMPACT_PROFILE,
+            "preliminary-decision-v1",
+            SENTENCE_CONTEXT_PROFILE,
+        )
         actor_role = settings.model_profile == ACTOR_ROLE_MODEL_PROFILE or actor_role_v2
         goal_role = settings.model_profile == GOAL_ROLE_MODEL_PROFILE or actor_role
         role_table = (
@@ -281,14 +362,26 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
             )
             or goal_role
         )
-        is_table = settings.model_profile == TABLE_MODEL_PROFILE or role_table
+        is_table = settings.model_profile == TABLE_MODEL_PROFILE or role_table or fallback
         is_context = settings.model_profile == CONTEXT_MODEL_PROFILE or is_table
         if is_table:
             expected_schema = TABLE_SCHEMA
-            if settings.model_profile in (P2_MODEL_PROFILE, POSITION_P2_MODEL_PROFILE):
+            if fallback:
+                expected_prompt = (
+                    SENTENCE_FALLBACK_BASE_PROMPT
+                    if fallback_sources
+                    else SENTENCE_FALLBACK_SYSTEM_PROMPT
+                )
+            elif settings.model_profile in (P2_MODEL_PROFILE, POSITION_P2_MODEL_PROFILE):
                 expected_prompt = P2_SYSTEM_PROMPT
             elif settings.model_profile == P1_MODEL_PROFILE:
                 expected_prompt = P1_SYSTEM_PROMPT
+            elif settings.model_profile == SENTENCE_CONTEXT_PROFILE:
+                expected_prompt = SENTENCE_CONTEXT_SYSTEM_PROMPT
+            elif settings.model_profile == COMPACT_PROFILE:
+                expected_prompt = COMPACT_PROMPT
+            elif settings.model_profile == PB1_MODEL_PROFILE:
+                expected_prompt = PB1_SYSTEM_PROMPT
             elif actor_role_v2:
                 expected_prompt = ACTOR_ROLE_SYSTEM_PROMPT_V2
             elif actor_role:
@@ -311,11 +404,29 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
         else:
             expected_schema, expected_prompt = SCHEMA, SYSTEM_PROMPT
             expected_keys = _ENVELOPE_KEYS
+        if settings.model_profile == COMPACT_PROFILE:
+            from proofops.application.tagging.finals_i4 import K4_PRELIMINARY
+            from proofops.application.tagging.k1_semantics import GUIDANCE
+            from proofops.application.tagging.k9_contract import PRELIMINARY as K9_PRELIMINARY
+            from proofops.application.tagging.q1_contract import PRELIMINARY as Q1_PRELIMINARY
+            from proofops.application.tagging.v3_dec92 import PRELIMINARY as V3_PRELIMINARY
+
+            if settings.system_prompt in (
+                expected_prompt + "\n" + GUIDANCE,
+                K4_PRELIMINARY,
+                K9_PRELIMINARY,
+                Q1_PRELIMINARY,
+                V3_PRELIMINARY,
+                CF5_PRELIMINARY,
+            ):
+                expected_prompt = settings.system_prompt
         # Mandatory callback plus common tenant/claim/request UUID, packet/
         # signature SHA, settings/binding/model/region/temperature/replica/
         # output-cap validation; raises before any spend on failure.
         authorization = self._authorize_request(request)
-        if settings.system_prompt != expected_prompt:
+        if settings.system_prompt != (
+            SENTENCE_FALLBACK_SYSTEM_PROMPT if fallback else expected_prompt
+        ):
             raise ValueError("UPSTAGE_PRELIMINARY_PROMPT_INVALID")
         system = request.get("system_prompt")
         if not isinstance(system, str) or system != settings.rendered_system:
@@ -324,6 +435,40 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
             user = json.loads(request["user_json"])
         except (TypeError, ValueError, KeyError):
             raise ValueError("UPSTAGE_PRELIMINARY_PACKET_INVALID") from None
+        if settings.system_prompt == CF5_PRELIMINARY:
+            validate_cf5_packet(user)
+            expected_keys = expected_keys | {"cf5_context_policy", "cf5_context_sha256"}
+        if fallback_sources:
+            system = replace(settings, system_prompt=SENTENCE_FALLBACK_BASE_PROMPT).rendered_system
+        catalog = getattr(self, "_display_catalog", None)
+        response_policy = (
+            user.get("preliminary_response_policy") if isinstance(user, dict) else None
+        )
+        if response_policy is not None:
+            from proofops.application.tagging.k4_contract import RESPONSE_POLICY
+
+            if response_policy != RESPONSE_POLICY:
+                raise ValueError("K4_RESPONSE_POLICY_MISMATCH")
+            expected_keys = expected_keys | {"preliminary_response_policy"}
+        if isinstance(user, dict) and "k9_targeted_wire_policy" in user:
+            from proofops.application.tagging.k9_contract import BINDING_POLICY, BINDING_V4_POLICY
+
+            if user["k9_targeted_wire_policy"] not in (BINDING_POLICY, BINDING_V4_POLICY):
+                raise ValueError("K9_BINDING_POLICY_MISMATCH")
+            expected_keys = expected_keys | {"k9_targeted_wire_policy"}
+        quality_policy = user.get("structural_quality_policy") if isinstance(user, dict) else None
+        if quality_policy is not None:
+            from proofops.application.tagging.q1_contract import validate_policy
+
+            validate_policy(quality_policy)
+            expected_keys = expected_keys | {"structural_quality_policy"}
+        if catalog is not None:
+            expected_keys = expected_keys | {"display_text"}
+            if isinstance(user, dict) and "preliminary_recovery_policy" in user:
+                from proofops.application.tagging.k2_recovery import validate_policy
+
+                validate_policy(user["preliminary_recovery_policy"])
+                expected_keys = expected_keys | {"preliminary_recovery_policy"}
         if not isinstance(user, dict) or set(user) != expected_keys:
             raise ValueError("UPSTAGE_PRELIMINARY_PACKET_INVALID")
         if user["schema"] != expected_schema:
@@ -383,8 +528,143 @@ class UpstagePreliminaryTransport(UpstageTaggingTransport):
                 raise ValueError("UPSTAGE_PRELIMINARY_TABLE_SOURCE_INVALID")
         if is_context:
             self._validate_context_shape(user, data, table=is_table)
+        if fallback:
+            context = data["context_blocks"]
+            if (fallback_sources and context) or any(
+                b["quality"] != "verified"
+                or b["source_ref"].get("verification_state") != "verified"
+                for b in context
+            ):
+                raise ValueError("UPSTAGE_PRELIMINARY_CONTEXT_INVALID")
+        if catalog is not None:
+            from proofops.application.ingest.display_text import POLICY, SYSTEM_SUFFIX
+
+            # Remove server-only metadata only AFTER the full authorized packet
+            # identity check. It never enters the provider wire or instructions.
+            user.pop("preliminary_recovery_policy", None)
+            display = user.pop("display_text")
+            if display["policy"] != POLICY or len(display["sources"]) != len(sources):
+                raise ValueError("DISPLAY_PACKET_MISMATCH")
+            for entry, pin in zip(sources, display["sources"], strict=True):
+                ident = pin["identity"]
+                block = catalog._blocks[ident["source_id"]]
+                ref = asdict(block.source_ref()) | dict(
+                    char_start=ident["char_start"], char_end=ident["char_end"], quote=entry["text"]
+                )
+                if catalog.pin(ref) != pin:
+                    raise ValueError("DISPLAY_PACKET_MISMATCH")
+                entry["text"] = pin["text"]
+            context = data.get("context_blocks", [])
+            if len(context) != len(display["context"]):
+                raise ValueError("DISPLAY_PACKET_MISMATCH")
+            for entry, pin in zip(context, display["context"], strict=True):
+                if (
+                    catalog.context_pin(entry) != pin
+                    or canonical_hash(entry["text"]) != pin["raw_sha256"]
+                ):
+                    raise ValueError("DISPLAY_PACKET_MISMATCH")
+                entry["text"] = pin["text"]
+            user["display_policy"] = POLICY
+            user["display_map_sha256"] = canonical_hash(display)
+            system += SYSTEM_SUFFIX
+        schema_json = settings.schema_json
+        if "preliminary_fact_fields" in request:
+            if (
+                request["preliminary_fact_fields"] != "preliminary-fact-fields-pb2-v1"
+                or settings.model_profile != COMPACT_PROFILE
+            ):
+                raise ValueError("PRELIMINARY_FACT_FIELDS_POLICY_UNKNOWN")
+            schema = json.loads(schema_json)
+            dimensions = schema["properties"]["dimensions"]
+            dimensions["additionalProperties"] = False
+            dimensions["properties"] = {
+                name: {"$ref": "#/$defs/source_span"}
+                for name in (
+                    "entity",
+                    "metric",
+                    "reporting_period",
+                    "facility",
+                    "scope",
+                    "product",
+                    "material",
+                    "boundary",
+                )
+            }
+            schema_json = json.dumps(
+                schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            system += (
+                "\nDimensions may contain only entity, metric, reporting_period, facility, "
+                "scope, product, material and boundary. Do not add unit, value or quantity; "
+                "those are element facts, not attribution dimensions. Keep unknown axes null."
+            )
+            scope = request.get("preliminary_fact_fields_scope")
+            if scope is not None:
+                if scope != "table_claims":
+                    raise ValueError("PRELIMINARY_FACT_FIELDS_SCOPE_UNKNOWN")
+                system += (
+                    " Entity, metric and reporting_period are required. Other axes are optional: "
+                    "include only when explicitly applicable in this atomic claim or its verified "
+                    "table axes; omit unrelated axes. An applicable unresolved axis stays null."
+                )
+        if response_policy is not None:
+            schema = json.loads(schema_json)
+            schema["properties"].pop("claim_id")
+            schema["required"].remove("claim_id")
+            schema_json = json.dumps(
+                schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            system = system.replace(settings.schema_json, schema_json, 1)
+            user.pop("preliminary_response_policy")
+        from proofops.application.tagging.finals_i4 import K4_PRELIMINARY, preliminary_k4
+        from proofops.application.tagging.k9_contract import PRELIMINARY as K9_PRELIMINARY
+        from proofops.application.tagging.k9_contract import preliminary as preliminary_k9
+        from proofops.application.tagging.q1_contract import PRELIMINARY as Q1_PRELIMINARY
+        from proofops.application.tagging.q1_contract import preliminary as preliminary_q1
+        from proofops.application.tagging.v3_dec92 import PRELIMINARY as V3_PRELIMINARY
+        from proofops.application.tagging.v3_dec92 import preliminary as preliminary_v3
+
+        if settings.system_prompt in (
+            K4_PRELIMINARY,
+            K9_PRELIMINARY,
+            Q1_PRELIMINARY,
+            V3_PRELIMINARY,
+            CF5_PRELIMINARY,
+        ):
+            if response_policy is None:
+                raise ValueError("I4_RESPONSE_POLICY_REQUIRED")
+            renderer = (
+                preliminary_cf5
+                if settings.system_prompt == CF5_PRELIMINARY
+                else preliminary_v3
+                if settings.system_prompt == V3_PRELIMINARY
+                else preliminary_q1
+                if settings.system_prompt == Q1_PRELIMINARY
+                else preliminary_k9
+                if settings.system_prompt == K9_PRELIMINARY
+                else preliminary_k4
+            )
+            if user.pop("k9_targeted_wire_policy", None) is not None:
+                quote = user["untrusted_document_data"]["sources"][0]["text"]
+                renderer = (
+                    preliminary_cf5
+                    if settings.system_prompt == CF5_PRELIMINARY
+                    else preliminary_v3
+                    if settings.system_prompt == V3_PRELIMINARY
+                    else preliminary_q1
+                    if settings.system_prompt == Q1_PRELIMINARY
+                    else preliminary_k9
+                )
+                system = renderer(json.loads(schema_json), quote=quote)
+            else:
+                system = renderer(json.loads(schema_json))
+        if quality_policy is not None:
+            from proofops.application.tagging.finals_i4 import _quality_guidance
+
+            system += _quality_guidance(quality_policy, preliminary=True)
+            user.pop("structural_quality_policy")
         wire_user = json.dumps(user, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return system, wire_user, {}, authorization, settings.schema_json
+        return system, wire_user, {}, authorization, schema_json
 
     @staticmethod
     def _validate_context_shape(user: dict, data: dict, *, table: bool = False) -> None:

@@ -64,7 +64,7 @@ def prepared(tmp_path, monkeypatch):
 
 
 def test_original_page_binding_and_whole_table_only_geometry(tmp_path, monkeypatch):
-    from evaluation.upstage_table_candidates import build_table_batch
+    from tests.support.upstage_table_candidates import build_table_batch
 
     source, receipt = prepared(tmp_path, monkeypatch)
     manifest = str(uuid4())
@@ -96,7 +96,7 @@ def test_original_page_binding_and_whole_table_only_geometry(tmp_path, monkeypat
 def test_candidate_binding_rejects_mismatches(tmp_path, monkeypatch, mutation):
     from proofops.domain.provenance import canonical_hash
 
-    from evaluation.upstage_table_candidates import build_table_batch
+    from tests.support.upstage_table_candidates import build_table_batch
 
     source, receipt = prepared(tmp_path, monkeypatch)
     tenant = source.tenant_id
@@ -122,7 +122,7 @@ def test_candidate_binding_rejects_mismatches(tmp_path, monkeypatch, mutation):
 def test_malformed_provider_envelope_is_a_controlled_rejection(tmp_path, monkeypatch, mutation):
     from proofops.domain.provenance import canonical_hash
 
-    from evaluation.upstage_table_candidates import build_table_batch
+    from tests.support.upstage_table_candidates import build_table_batch
 
     source, receipt = prepared(tmp_path, monkeypatch)
     if mutation == "receipt":

@@ -1,6 +1,6 @@
 import pytest
 
-from evaluation.review_benchmark import freeze_cases, score_review
+from tests.support.review_benchmark import freeze_cases, score_review
 
 
 def packet():
@@ -61,7 +61,7 @@ def test_changed_source_or_foreign_case_is_rejected():
 
 
 def test_review_html_cannot_execute_source_markup():
-    from evaluation.review_benchmark import review_html
+    from tests.support.review_benchmark import review_html
 
     cases = packet()["cases"]
     cases[0]["source"]["text"] = '</script><img src=x onerror="alert(1)">'

@@ -5,8 +5,8 @@ from dataclasses import replace
 
 import pytest
 
-from evaluation import claim_prefilter as prefilter
 from tests.acceptance.test_claims import TENANT, graph_of
+from tests.support import claim_prefilter as prefilter
 
 
 def test_candidates_keep_qualitative_and_implicit_claims_and_defer_unknown():

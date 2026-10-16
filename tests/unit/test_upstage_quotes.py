@@ -2,7 +2,7 @@
 
 import pytest
 
-from evaluation.upstage_live_probe import locate_quotes
+from tests.support.upstage_live_probe import locate_quotes
 
 
 def test_exact_unique_quotes_receive_original_offsets():

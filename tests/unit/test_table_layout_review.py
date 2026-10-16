@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.table_layout_review import review_layout
+from tests.support.table_layout_review import review_layout
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DOCUMENTS = ROOT / "tests/fixtures/source-documents"

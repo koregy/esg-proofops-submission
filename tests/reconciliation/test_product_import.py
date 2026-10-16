@@ -5,13 +5,13 @@ from types import SimpleNamespace
 
 from proofops.adapters.local.reconciliation_store import LocalReconciliationStore
 
-from evaluation.reconciliation_import import main
 from tests.reconciliation.test_product_store import (
     TENANT,
     auth,
     build_verified_run,
     prepare_bundle,
 )
+from tests.support.reconciliation_import import main
 
 
 def test_operator_import_preserves_pending_review_and_ignores_file_approvals(
