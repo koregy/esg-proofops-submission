@@ -133,7 +133,7 @@ def test_run_sequencing_hardstop_across_modes_is_fail_closed(tmp_path, monkeypat
             calls.append(1)
             raise ValueError(code)
 
-    monkeypatch.setattr(module, "__file__", str(tmp_path / "evaluation/probe.py"))
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tests/support/probe.py"))
     monkeypatch.setattr(module, "load_graph", lambda *_: graph)
     monkeypatch.setattr(module, "UpstageProbe", HardStop)
     (tmp_path / ".env.upstage.local").write_text("UPSTAGE_API_KEY=offline-test\n")

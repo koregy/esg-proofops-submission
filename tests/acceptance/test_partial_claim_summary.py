@@ -16,20 +16,26 @@ import {PartialClaimSummary} from CLAIMS;
 import assert from 'node:assert/strict';
 const ref={source_id:'s',page_num:48,quote:'재생에너지 <b>조달</b> 확대',
 verification_state:'verified'};
-const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',evidence_refs:[]},
+const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',
+ evidence_refs:[{...ref,quote:'2040년'}]},
  {element_id:'G6',state:'unknown',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G4',state:'conflict',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G3',state:'unknown',normalized_value:null,evidence_refs:[]}];
 const render=(decision,projection=null,items=elements)=>renderToStaticMarkup(
  React.createElement(PartialClaimSummary,
  {decision,projection,elements:items,rawCandidates:[],onSourceOpen:()=>{}}));
-for(const decision of [null,{decision_status:'not_run',missing_elements:[]}]) {
+for(const decision of [null,{decision_status:'not_run',missing_elements:[],gap_ids:[]}]) {
  const html=render(decision);
  for(const text of ['검토 중인 내용','2040년','G6','G4','원문 48쪽','검토 후보','&lt;b&gt;'])
  assert.ok(html.includes(text),text);
  assert.ok(!html.includes('요건 미충족'));
  assert.ok(!html.includes('<b>조달</b>'));
  assert.ok(!html.includes('미검증 근거 후보'));
+}
+// A present tag without verified source evidence must not become a displayed fact.
+for (const refs of [[], [{...ref,verification_state:'candidate'}]]) {
+ const html=render(null,null,[{...elements[0],evidence_refs:refs}]);
+ assert.ok(!html.includes('2040년'));
 }
 const approval=render(null,{blocked_reason:'DOMAIN_RULEPACK_UNAPPROVED',
 blocked_action:'판정기준 승인이 필요합니다.'});

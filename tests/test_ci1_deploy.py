@@ -153,7 +153,7 @@ def test_dry_run_and_invalid_input_never_call_cloud(tmp_path, image):
 
 
 def test_workflow_gates_pin_actions_and_smoke_before_oidc_and_push():
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-backend.yml").read_text())
+    workflow = yaml.safe_load((ROOT / "deploy/ci/backend.yml").read_text())
     job = workflow["jobs"]["deploy"]
     assert job["environment"] == "production"
     assert job["runs-on"] == "ubuntu-24.04-arm"
@@ -184,7 +184,7 @@ def test_workflow_gates_pin_actions_and_smoke_before_oidc_and_push():
 def test_ssm_result_requires_success_exit_code_and_exact_health_marker(
     tmp_path, status, code, marker, expected
 ):
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-backend.yml").read_text())
+    workflow = yaml.safe_load((ROOT / "deploy/ci/backend.yml").read_text())
     step = next(
         s["run"]
         for s in workflow["jobs"]["deploy"]["steps"]
@@ -246,9 +246,9 @@ def test_ambiguous_apply_and_dry_run_flags_are_rejected():
 
 
 def test_admin_iam_documents_are_valid_json_and_exactly_scoped():
-    text = (ROOT / "deploy/ec2/admin-setup.md").read_text()
     trust, deploy, instance = [
-        json.loads(s) for s in re.findall(r"```json\n(.*?)\n```", text, re.S)
+        json.loads((ROOT / "deploy/ec2" / f"{name}.json").read_text())
+        for name in ("github-oidc-trust", "github-deploy-policy", "instance-ecr-policy")
     ]
     conditions = trust["Statement"][0]["Condition"]["StringEquals"]
     assert conditions["token.actions.githubusercontent.com:sub"] == (
@@ -271,7 +271,7 @@ def test_admin_iam_documents_are_valid_json_and_exactly_scoped():
 
 @pytest.mark.parametrize("denied", [False, True])
 def test_ssm_polling_retries_eventual_consistency_but_not_access_denied(tmp_path, denied):
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-backend.yml").read_text())
+    workflow = yaml.safe_load((ROOT / "deploy/ci/backend.yml").read_text())
     step = next(
         s["run"]
         for s in workflow["jobs"]["deploy"]["steps"]
