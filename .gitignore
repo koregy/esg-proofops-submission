@@ -59,5 +59,3 @@ apps/web/public/pdfjs/
 /apps/web/test/fixtures/w12/kakao.result.json
 /apps/web/test/fixtures/w12/lg.result.json
 /docs/R00_DOMAIN_DECISIONS.md
-/tests/fixtures/pipeline/live-extraction/extraction-year-abbreviation/packet.json
-/tests/fixtures/pipeline/live-extraction/extraction-year-abbreviation/raw_response.json
