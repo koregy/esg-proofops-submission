@@ -234,7 +234,7 @@ def test_page_only_notes_are_source_bound_and_cannot_gain_ownership(tmp_path):
 
 
 def test_note_proposals_bind_exact_page_fragments_and_targets_without_approving():
-    from evaluation.table_notes import prepare, validate
+    from tests.support.table_notes import prepare, validate
 
     source = pdf()
     graph = fuse_candidates(
@@ -279,7 +279,7 @@ def test_note_proposals_bind_exact_page_fragments_and_targets_without_approving(
 def test_note_run_preserves_receipts_and_invalid_output_as_unknown(tmp_path):
     import json
 
-    from evaluation.table_notes import run
+    from tests.support.table_notes import run
 
     source = pdf()
     graph = fuse_candidates(
@@ -323,7 +323,7 @@ def test_note_run_preserves_receipts_and_invalid_output_as_unknown(tmp_path):
 
 
 def test_unlocated_cells_remain_note_targets_with_explicit_location_uncertainty():
-    from evaluation.table_notes import prepare
+    from tests.support.table_notes import prepare
 
     source = pdf()
     batch = table([["Metric1"], ["Value"]])
@@ -347,7 +347,7 @@ def test_unlocated_cells_remain_note_targets_with_explicit_location_uncertainty(
 def test_two_stage_notes_send_all_context_then_only_detected_notes(tmp_path):
     import json
 
-    from evaluation.table_notes import run
+    from tests.support.table_notes import run
 
     source = pdf()
     graph = fuse_candidates(
@@ -401,7 +401,7 @@ def test_numbered_note_requires_unique_native_raised_marker_target(suffix, separ
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject
 
-    from evaluation.table_notes import prepare, validate
+    from tests.support.table_notes import prepare, validate
 
     writer = PdfWriter()
     writer.append(PdfReader(BytesIO(pdf())))
@@ -457,7 +457,7 @@ def test_numbered_note_requires_unique_native_raised_marker_target(suffix, separ
     # A missing marker target must not consume a second call that can only guess.
     import json
 
-    from evaluation.table_notes import run
+    from tests.support.table_notes import run
 
     unbound = fuse_candidates(
         (replace(table([["Other"], ["Value"]]), source_sha256=sha256(source).hexdigest()),),
@@ -505,7 +505,7 @@ def test_numbered_note_requires_unique_native_raised_marker_target(suffix, separ
 
 
 def test_standalone_numeric_fragment_cannot_trigger_unrestricted_note_binding():
-    from evaluation.table_notes import marker_targets
+    from tests.support.table_notes import marker_targets
 
     packet = dict(untrusted_document_data=dict(fragments=[dict(id="f0", text="363")]))
     assert marker_targets(["f0"], packet) == []
@@ -514,7 +514,7 @@ def test_standalone_numeric_fragment_cannot_trigger_unrestricted_note_binding():
 
 
 def test_explicit_coverage_note_targets_unique_aligned_table_not_neighbor_metric():
-    from evaluation.table_notes import marker_targets
+    from tests.support.table_notes import marker_targets
 
     packet = dict(
         untrusted_document_data=dict(
@@ -548,7 +548,7 @@ def test_oversized_discovery_preserves_fragments_and_deduplicates_overlap(tmp_pa
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject
 
-    from evaluation.table_notes import run
+    from tests.support.table_notes import run
 
     writer = PdfWriter()
     writer.append(PdfReader(BytesIO(pdf())))
@@ -655,7 +655,7 @@ def test_oversized_discovery_preserves_fragments_and_deduplicates_overlap(tmp_pa
 
 
 def test_native_hanging_note_lines_join_without_crossing_columns_or_next_numbers():
-    from evaluation.table_notes import join_note_lines
+    from tests.support.table_notes import join_note_lines
 
     fragments = [
         dict(id="f0", text="1) rounded", bbox=[10, 100, 200, 106]),
@@ -674,7 +674,7 @@ def test_native_hanging_note_lines_join_without_crossing_columns_or_next_numbers
 
 @pytest.mark.parametrize("cell_text", ["1)Metric", "prefix 1) Metric", "Metric 1)"])
 def test_repeated_separate_markers_are_scoped_to_the_notes_table_column(cell_text):
-    from evaluation.table_notes import marker_targets
+    from tests.support.table_notes import marker_targets
 
     packet = dict(
         untrusted_document_data=dict(
@@ -716,7 +716,7 @@ def test_repeated_separate_markers_are_scoped_to_the_notes_table_column(cell_tex
 
 @pytest.mark.parametrize("text", ["11)Metric", "SubMetric1)"])
 def test_separate_marker_cannot_match_another_marker_number_or_word_suffix(text):
-    from evaluation.table_notes import marker_targets
+    from tests.support.table_notes import marker_targets
 
     packet = dict(
         untrusted_document_data=dict(

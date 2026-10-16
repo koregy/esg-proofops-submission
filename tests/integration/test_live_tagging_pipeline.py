@@ -157,7 +157,12 @@ def _fake_post_factory(calls):
 
 
 def _pipeline_setup(
-    tmp_path, monkeypatch, *, relation_stage=False, fact_assembly_profile="strict-v1"
+    tmp_path,
+    monkeypatch,
+    *,
+    relation_stage=False,
+    fact_assembly_profile="strict-v1",
+    relation_attribution_policy="relation-attribution-v2",
 ):
     """Build a genuine upstage_local run plus parse/extract checkpoints."""
     from proofops.application.rulepacks import RulePackRecord
@@ -173,6 +178,7 @@ def _pipeline_setup(
     monkeypatch.setattr(lifecycle, "pdf", lambda count: pdf())
     service, body, _, _ = _live_service(tmp_path)
     service.fact_assembly_profile = fact_assembly_profile
+    service.relation_attribution_policy = relation_attribution_policy
     if relation_stage:
         from tests.integration.test_relation_runtime_config import _relation
 
@@ -411,7 +417,16 @@ def test_live_pipeline_publishes_candidate_review_and_replays(tmp_path, monkeypa
     assert "1234 tCO2e" not in ctx["stream"].getvalue()
 
 
-@pytest.mark.parametrize("selected", ["strict-v1", "partial-facts-v1"])
+@pytest.mark.parametrize(
+    "selected",
+    [
+        "strict-v1",
+        "partial-facts-v1",
+        "grade-relevant-unanimity-v1",
+        "grade-relevant-unanimity-v2",
+        "grade-relevant-unanimity-v3",
+    ],
+)
 def test_fact_assembly_env_selection_is_pinned_and_replayed(tmp_path, monkeypatch, selected):
     from proofops.adapters.local.run_store import LocalSQLiteRunStore
     from proofops_api.local_runtime import load_local_runtime
@@ -460,6 +475,12 @@ def test_fact_assembly_env_selection_is_pinned_and_replayed(tmp_path, monkeypatc
     )
     inputs = reopened.tags.load_inputs(tenant, run_id, claim_id)
     assert inputs.fact_assembly_profile == selected
+    if selected != "strict-v1":
+        from proofops.application.tagging.consensus import PARTIAL_FACTS_PROFILES
+
+        assert inputs.snapshot()["fact_assembly"] == dict(
+            profile=selected, sha256=PARTIAL_FACTS_PROFILES[selected]
+        )
     assert reopened.run_once(tenant_id=tenant, run_id=run_id) == "needs_review"
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from evaluation.html_table_cells import parse_table_cells
+from tests.support.html_table_cells import parse_table_cells
 
 
 def test_merged_two_row_header_occupancy():

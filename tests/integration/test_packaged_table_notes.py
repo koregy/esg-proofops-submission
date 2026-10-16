@@ -7,7 +7,7 @@ def test_evaluation_reuses_packaged_note_validation():
     from proofops.adapters.local import table_layout_context as layout
     from proofops.adapters.local import table_notes as notes
 
-    from evaluation import table_layout_context, table_notes
+    from tests.support import table_layout_context, table_notes
 
     assert table_notes.prepare is notes.prepare
     assert table_notes.validate is notes.validate
@@ -108,7 +108,7 @@ def test_packaged_note_extraction_owns_prompts_and_run_without_evaluation_import
 
     import proofops.adapters.local.note_extraction as packaged
 
-    from evaluation import table_notes as compat
+    from tests.support import table_notes as compat
 
     assert compat.SYSTEM is packaged.SYSTEM
     assert compat.DISCOVERY_SYSTEM is packaged.DISCOVERY_SYSTEM

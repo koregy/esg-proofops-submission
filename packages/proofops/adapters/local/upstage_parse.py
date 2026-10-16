@@ -16,7 +16,10 @@ import hashlib
 import http.client
 import io
 import json
+import sqlite3
+import ssl
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic, sleep
@@ -33,6 +36,21 @@ MAX_PDF_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 10
 MIN_PAGES = 1
 MAX_RESPONSE_BYTES = 1_048_576
+
+
+def transport_failure(error):
+    """Closed codes and exception classes only; exception messages can contain keys."""
+    import re
+
+    if isinstance(error, TimeoutError):
+        return "UPSTAGE_REQUEST_TIMEOUT"
+    if isinstance(error, ssl.SSLError):
+        return "UPSTAGE_TLS_FAILED"
+    if isinstance(error, ConnectionError | OSError | http.client.HTTPException):
+        return "UPSTAGE_CONNECTION_FAILED"
+    code = str(error)
+    return code if re.fullmatch(r"UPSTAGE_[A-Z0-9_]{1,72}", code) else "UPSTAGE_REQUEST_FAILED"
+
 
 COST_PER_PAGE = {
     "standard": Decimal("0.011"),
@@ -52,6 +70,80 @@ PRICE_SNAPSHOT = {
 
 class UpstageParseProbe(UpstageProbe):
     """Local evaluation transport for Document Parse; not production approval."""
+
+    download_workers = 1
+
+    def _download_retry(self, url):
+        # GET is safe to repeat against the accepted job. Never repeat its POST.
+        for attempt in range(3):
+            try:
+                return self._async_download(url)
+            except (ValueError, OSError, http.client.HTTPException) as error:
+                code = transport_failure(error)
+                if attempt == 2 or code not in {
+                    "UPSTAGE_REQUEST_TIMEOUT",
+                    "UPSTAGE_CONNECTION_FAILED",
+                    *(f"UPSTAGE_DOWNLOAD_HTTP_{s}" for s in (429, 500, 502, 503, 504)),
+                }:
+                    raise
+                sleep(1)
+
+    def _download_batches(self, items):
+        if type(self.download_workers) is not int or not 1 <= self.download_workers <= 4:
+            raise ValueError("UPSTAGE_DOWNLOAD_CONCURRENCY_INVALID")
+        urls = [item["download_url"] for item in items]
+        if self.download_workers == 1 or len(urls) < 2:
+            return [self._download_retry(url) for url in urls]
+        # Paid POST remains a single page-batched request. GET outputs and error
+        # propagation retain provider order, independent of completion order.
+        with ThreadPoolExecutor(max_workers=self.download_workers) as pool:
+            return list(pool.map(self._download_retry, urls))
+
+    def _reserve_async(self, request_id, body, cost):
+        """Additive metadata; retain every historical USD1 reservation and policy."""
+        with sqlite3.connect(self.ledger, timeout=10) as db:
+            db.execute("BEGIN IMMEDIATE")
+            limit = self._authorized_limit(db)
+            if db.execute("SELECT 1 FROM probe_calls WHERE request_id=?", (request_id,)).fetchone():
+                raise ValueError("DUPLICATE_PROBE_REQUEST")
+            if self._call_total(db) + cost > limit:
+                raise ValueError("BUDGET_EXHAUSTED")
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS parse_reservations "
+                "(request_id TEXT PRIMARY KEY,bound TEXT NOT NULL,body TEXT NOT NULL)"
+            )
+            db.execute(
+                "INSERT INTO parse_reservations VALUES (?,?,?)",
+                (request_id, str(cost), json.dumps(body, sort_keys=True)),
+            )
+            db.execute(
+                "INSERT INTO probe_calls VALUES (?,?,?,NULL)",
+                (request_id, canonical_hash(body), str(cost)),
+            )
+
+    def _settle_async(self, request_id, cost, receipt):
+        with sqlite3.connect(self.ledger) as db:
+            if (
+                db.execute(
+                    "UPDATE probe_calls SET receipt=? WHERE request_id=? "
+                    "AND receipt IS NULL AND committed=?",
+                    (json.dumps(receipt, sort_keys=True), request_id, str(cost)),
+                ).rowcount
+                != 1
+            ):
+                raise ValueError("BUDGET_SETTLEMENT_INVALID")
+
+    def _dispatch_audit(self, request_id, **fields):
+        # No credentials, signed URLs, document text or provider error bodies.
+        directory = self.ledger.parent / "parse-dispatch"
+        directory.mkdir(exist_ok=True, mode=0o700)
+        path = directory / (canonical_hash(request_id) + ".json")
+        previous = json.loads(path.read_text()) if path.exists() else {}
+        previous.update(request_id=request_id, recorded_at=datetime.now(UTC).isoformat(), **fields)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(previous, sort_keys=True) + "\n")
+        temporary.chmod(0o600)
+        temporary.replace(path)
 
     def _validate_pdf(self, pdf_bytes: bytes) -> int:
         if not isinstance(pdf_bytes, bytes):
@@ -115,7 +207,9 @@ class UpstageParseProbe(UpstageProbe):
             )
             response = connection.getresponse()
             if response.status != 200:
-                raise ValueError(f"UPSTAGE_HTTP_{response.status}")
+                from proofops.adapters.local.provider_errors import upstage_http_error
+
+                raise upstage_http_error(response)
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ValueError("UPSTAGE_RESPONSE_TOO_LARGE")
@@ -133,7 +227,9 @@ class UpstageParseProbe(UpstageProbe):
             )
             response = connection.getresponse()
             if response.status != 200:
-                raise ValueError(f"UPSTAGE_HTTP_{response.status}")
+                from proofops.adapters.local.provider_errors import upstage_http_error
+
+                raise upstage_http_error(response)
             raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ValueError("UPSTAGE_RESPONSE_TOO_LARGE")
@@ -198,21 +294,72 @@ class UpstageParseProbe(UpstageProbe):
             bytes_len=len(pdf_bytes),
             transport="async",
         )
-        self._reserve(request_id, body)
+        self._reserve_async(request_id, body, cost)
+        self._dispatch_audit(
+            request_id,
+            phase="dispatch_started",
+            request_sha256=canonical_hash(body),
+            pages=pages,
+            mode=mode,
+            bound_usd=str(cost),
+            request_bytes=len(pdf_bytes),
+            post_timeout_seconds=60,
+            poll_timeout_seconds=30,
+            deadline_seconds=180,
+            download_workers=self.download_workers,
+        )
         started = monotonic()
         try:
+            self._dispatch_audit(request_id, io_stage="submit")
             submitted = self._post_parse(pdf_bytes, mode, "/v1/document-digitization/async")
             provider_id = submitted.get("request_id")
             if not isinstance(provider_id, str) or not provider_id or "/" in provider_id:
                 raise ValueError("UPSTAGE_ASYNC_RESPONSE_INVALID")
+            self._dispatch_audit(request_id, phase="accepted", provider_request_id=provider_id)
             deadline = monotonic() + 180
+            transient_failures = 0
             while True:
-                status = self._async_status(provider_id)
+                try:
+                    self._dispatch_audit(request_id, io_stage="poll")
+                    status = self._async_status(provider_id)
+                except (ValueError, OSError, http.client.HTTPException) as error:
+                    if (
+                        transport_failure(error)
+                        not in {
+                            "UPSTAGE_HTTP_429",
+                            "UPSTAGE_HTTP_500",
+                            "UPSTAGE_HTTP_502",
+                            "UPSTAGE_HTTP_503",
+                            "UPSTAGE_HTTP_504",
+                            "UPSTAGE_REQUEST_TIMEOUT",
+                            "UPSTAGE_CONNECTION_FAILED",
+                        }
+                        or transient_failures >= 2
+                        or monotonic() >= deadline
+                    ):
+                        raise
+                    transient_failures += 1
+                    self._dispatch_audit(
+                        request_id, phase="poll_retry", error_code=transport_failure(error)
+                    )
+                    sleep(1)
+                    continue
                 if status.get("status") == "completed":
                     break
                 if status.get("status") == "failed" or monotonic() >= deadline:
                     raise ValueError("UPSTAGE_ASYNC_FAILED")
-                if status.get("status") not in {"submitted", "started"}:
+                # Provider may queue a valid accepted job before inference starts.
+                # Keep polling this ID only; never repeat the paid POST.
+                self._dispatch_audit(
+                    request_id, phase="polling", provider_status=status.get("status")
+                )
+                if status.get("status") not in {
+                    "submitted",
+                    "scheduled",
+                    "started",
+                    "pending",
+                    "queued",
+                }:
                     raise ValueError("UPSTAGE_ASYNC_RESPONSE_INVALID")
                 sleep(1)
             if (
@@ -223,7 +370,8 @@ class UpstageParseProbe(UpstageProbe):
                 or len(status["batches"]) != (pages + 9) // 10
             ):
                 raise ValueError("UPSTAGE_ASYNC_RESPONSE_INVALID")
-            batches = [self._async_download(item["download_url"]) for item in status["batches"]]
+            self._dispatch_audit(request_id, io_stage="download")
+            batches = self._download_batches(status["batches"])
             seen = set()
             for batch in batches:
                 if batch.get("model") not in ALLOWED_MODELS or not isinstance(
@@ -241,9 +389,20 @@ class UpstageParseProbe(UpstageProbe):
             if seen != set(range(1, pages + 1)):
                 raise ValueError("UPSTAGE_ASYNC_RESPONSE_INVALID")
         except Exception as error:
-            code = str(error)
+            code = transport_failure(error)
             if not code.startswith("UPSTAGE_") or self._api_key in code:
                 code = "UPSTAGE_REQUEST_FAILED"
+            self._dispatch_audit(
+                request_id,
+                phase="failed",
+                error_code=code,
+                exception_type=type(error).__name__
+                if type(error).__module__ in {"builtins", "ssl", "http.client", "json.decoder"}
+                else "Other",
+                elapsed_seconds=round(monotonic() - started, 3),
+                http_status=getattr(error, "http_status", None),
+                provider_error_code=getattr(error, "provider_error_code", None),
+            )
             raise ValueError(code) from None
         archive = self.ledger.parent / "parse-responses"
         archive.mkdir(exist_ok=True, mode=0o700)
@@ -263,7 +422,8 @@ class UpstageParseProbe(UpstageProbe):
             provider_request_id=provider_id,
             duration_seconds=monotonic() - started,
         )
-        self._settle(request_id, str(cost), receipt)
+        self._settle_async(request_id, cost, receipt)
+        self._dispatch_audit(request_id, phase="settled")
         return dict(receipt, raw_batches=batches)
 
     def parse(self, pdf_bytes: bytes, *, request_id: str, mode: str) -> dict:
@@ -294,10 +454,14 @@ class UpstageParseProbe(UpstageProbe):
         try:
             data = self._post_parse(pdf_bytes, mode)
         except Exception as error:
+            from proofops.application.budget import BudgetExceeded
+
+            if isinstance(error, BudgetExceeded):
+                raise
             code = str(error)
             if code not in {
                 f"UPSTAGE_HTTP_{n}" for n in (400, 401, 403, 404, 429, 500, 502, 503)
-            } | {"UPSTAGE_RESPONSE_TOO_LARGE"}:
+            } | {"UPSTAGE_RESPONSE_TOO_LARGE", "UPSTAGE_API_KEY_IS_NOT_ALLOWED"}:
                 code = "UPSTAGE_REQUEST_FAILED"
             # Do not expose credential
             if self._api_key in code:

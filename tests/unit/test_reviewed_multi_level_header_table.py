@@ -38,7 +38,7 @@ from proofops.application.tagging.table_sources import (
 )
 from pypdf import PdfWriter
 
-from evaluation.table_layout_review import review_layout
+from tests.support.table_layout_review import review_layout
 
 APP = Path(__file__).resolve().parents[2]
 LOTTE = APP / "tests/fixtures/source-documents/lotte.pdf"

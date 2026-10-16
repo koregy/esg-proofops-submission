@@ -9,7 +9,7 @@ FOREIGN = "99999999-9999-4999-8999-999999999999"
 
 
 def _manifest(*claim_ids: str, split: str = "holdout"):
-    from evaluation.splits.company_split import DatasetItem, verify_split
+    from tests.support.splits.company_split import DatasetItem, verify_split
 
     return verify_split(
         tuple(
@@ -21,7 +21,7 @@ def _manifest(*claim_ids: str, split: str = "holdout"):
 
 
 def test_company_split_isolated_across_reporting_years():
-    from evaluation.splits.company_split import DatasetItem, verify_split
+    from tests.support.splits.company_split import DatasetItem, verify_split
 
     items = (
         DatasetItem(TENANT, "acme-2024", "acme", "2024", "silver", "legacy_silver"),
@@ -33,7 +33,7 @@ def test_company_split_isolated_across_reporting_years():
 
 
 def test_review_confirmed_data_can_only_enter_fewshot_not_holdout():
-    from evaluation.splits.company_split import DatasetItem, verify_split
+    from tests.support.splits.company_split import DatasetItem, verify_split
 
     reviewed = DatasetItem(
         TENANT,
@@ -80,7 +80,7 @@ def test_review_confirmed_data_can_only_enter_fewshot_not_holdout():
 
 
 def test_development_is_a_supported_company_split():
-    from evaluation.splits.company_split import DatasetItem, verify_split
+    from tests.support.splits.company_split import DatasetItem, verify_split
 
     report = verify_split(
         (DatasetItem(TENANT, "dev-1", "devco", "2025", "development", "curated"),),
@@ -91,7 +91,7 @@ def test_development_is_a_supported_company_split():
 
 
 def test_split_rejects_duplicate_items_and_tenant_leaks():
-    from evaluation.splits.company_split import DatasetItem, verify_split
+    from tests.support.splits.company_split import DatasetItem, verify_split
 
     local = DatasetItem(TENANT, "same", "acme", "2025", "silver", "legacy_silver")
     foreign = DatasetItem(FOREIGN, "foreign", "other", "2025", "fewshot", "curated_fewshot")
@@ -103,8 +103,8 @@ def test_split_rejects_duplicate_items_and_tenant_leaks():
 
 
 def test_evaluation_reports_each_metric_with_its_real_denominator():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(
         tenant_id=TENANT,
@@ -168,7 +168,7 @@ def test_evaluation_reports_each_metric_with_its_real_denominator():
 
 
 def test_zero_denominators_are_null_not_zero_percent():
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(TENANT, "empty-synthetic-gold", "validation", (), (), ())
     predictions = PredictionSet(TENANT, gold.dataset_id, gold.split, (), (), ())
@@ -179,8 +179,8 @@ def test_zero_denominators_are_null_not_zero_percent():
 
 
 def test_evaluation_rejects_identity_mismatch_duplicates_and_unverified_gold():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(
         TENANT,
@@ -222,8 +222,8 @@ def test_evaluation_rejects_identity_mismatch_duplicates_and_unverified_gold():
 
 
 def test_conflicting_values_for_one_element_are_rejected():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset
 
     with pytest.raises(ValueError, match="duplicate element assignment"):
         GoldDataset(
@@ -240,8 +240,8 @@ def test_conflicting_values_for_one_element_are_rejected():
 
 
 def test_incorrect_prediction_binding_is_scored_as_false_positive_and_false_negative():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(
         TENANT,
@@ -276,7 +276,7 @@ def test_incorrect_prediction_binding_is_scored_as_false_positive_and_false_nega
 
 
 def test_pending_gold_and_predictions_are_excluded_from_selective_scores():
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(
         TENANT,
@@ -318,8 +318,8 @@ def test_pending_gold_and_predictions_are_excluded_from_selective_scores():
 
 
 def test_evaluation_requires_manifest_membership_and_rejects_unknown_element_claims():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(
         TENANT,
@@ -351,7 +351,7 @@ def test_evaluation_requires_manifest_membership_and_rejects_unknown_element_cla
 
 
 def test_unprovided_upstream_stage_metrics_are_explicitly_not_run():
-    from evaluation.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
+    from tests.support.metrics.pipeline import GoldDataset, PredictionSet, evaluate_dataset
 
     gold = GoldDataset(TENANT, "not-run-gold", "development", (), (), ())
     result = evaluate_dataset(
@@ -375,8 +375,8 @@ def test_unprovided_upstream_stage_metrics_are_explicitly_not_run():
 
 
 def test_gold_snapshots_freeze_nested_labels_and_require_full_claim_denominator():
-    from evaluation.metrics.elements import ElementFact
-    from evaluation.metrics.pipeline import GoldDataset
+    from tests.support.metrics.elements import ElementFact
+    from tests.support.metrics.pipeline import GoldDataset
 
     grades, labels = [["c1", "E1"]], [["c1", "INCOMPLETE"]]
     gold = GoldDataset(TENANT, "fixed", "validation", (), grades, labels)

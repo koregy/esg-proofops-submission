@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from evaluation.reconciliation_benchmark import evaluate_manifest, main
-from evaluation.reconciliation_cli import InputRejected
+from tests.support.reconciliation_benchmark import evaluate_manifest, main
+from tests.support.reconciliation_cli import InputRejected
 
 
 def digest(payload: bytes) -> str:

@@ -141,7 +141,7 @@ def test_ranking_values_preserved_for_valid_inputs():
     blocks = {b.source_id: b for b in graph.blocks}
     hits = search.search(search.scope, "온실가스를 감축하였습니다.").hits
     # Explicit full-page coverage: page 2 ("온실가스 사회 본문") also routes,
-    # unlike the section-map subset in evaluation/section_pipeline.py. Only the
+    # unlike the section-map subset in tests/support/section_pipeline.py. Only the
     # unrelated page 4 ("직원 수") stays out, with identical BM25 values.
     assert {blocks[h.source_id].page_num for h in hits} == {1, 2, 3, 5}
 

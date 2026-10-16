@@ -7,9 +7,9 @@ from proofops.domain.provenance import canonical_hash
 from proofops_agent.extraction import SyntheticClaimExtractor
 
 from evaluation.report_sections import POLICY_HASH, build_map
-from evaluation.section_pipeline import SectionSearch, plan_for_graph
 from tests.acceptance.test_claims import COMPOUND, TENANT, graph_of
 from tests.acceptance.test_rules import pack
+from tests.support.section_pipeline import SectionSearch, plan_for_graph
 
 
 def section_map(graph):
@@ -84,9 +84,9 @@ def test_scoped_claims_and_search_keep_all_data_and_missing_pages():
 
 
 def test_table_row_context_is_candidate_only_and_keeps_headers():
-    from evaluation.section_pipeline import table_row_contexts
     from tests.acceptance.test_parsing import TENANT as table_tenant
     from tests.acceptance.test_table_bindings import setup_case
+    from tests.support.section_pipeline import table_row_contexts
 
     graph, ids, _ = setup_case()
     result = table_row_contexts(graph, ids["r1c4"], tenant_id=table_tenant)
@@ -106,9 +106,9 @@ def test_table_context_first_row_handles_one_based_parser_indices():
 
     from proofops.application.ingest.graph_fusion import fuse_candidates
 
-    from evaluation.section_pipeline import table_row_contexts
     from tests.acceptance.test_parsing import TENANT as table_tenant
     from tests.acceptance.test_table_bindings import setup_case
+    from tests.support.section_pipeline import table_row_contexts
 
     graph, _, _ = setup_case()
     batch = graph.candidates[0]

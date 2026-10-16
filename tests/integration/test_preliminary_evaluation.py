@@ -29,7 +29,7 @@ class Probe:
 
 
 def evaluate(tmp_path, probe, *, claims=None):
-    from evaluation.preliminary_probe import evaluate_preliminary
+    from tests.support.preliminary_probe import evaluate_preliminary
 
     graph, claim, _ = corpus()
     return evaluate_preliminary(
@@ -128,7 +128,7 @@ def test_track_disagreement_is_not_majority_confirmation(tmp_path):
 
 
 def test_cli_missing_key_fails_before_loading_source(tmp_path, monkeypatch, capsys):
-    from evaluation.preliminary_probe import main
+    from tests.support.preliminary_probe import main
 
     key_file = tmp_path / "empty.env"
     key_file.write_text("UNRELATED=private-value\n")

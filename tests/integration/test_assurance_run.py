@@ -19,10 +19,10 @@ from proofops.adapters.local.run_artifacts import load_run_graph
 from proofops.application.assurance import ClaimContext, match_assurance
 from proofops.domain.provenance import canonical_hash
 
-from evaluation.assurance_run import run_assurance_producer
 from tests.integration.test_local_extract_runner import extraction_setup
 from tests.integration.test_local_parser_runner import TENANT
 from tests.integration.test_run_lifecycle import client  # noqa: F401  (fixture wiring)
+from tests.support.assurance_run import run_assurance_producer
 
 
 class FakeProbe:

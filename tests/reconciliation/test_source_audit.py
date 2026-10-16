@@ -4,8 +4,8 @@ import hashlib
 
 import pytest
 
-from evaluation.reconciliation_source_audit import account_hint, audit_sources, main
 from tests.reconciliation.test_candidates import CORP, FY, RECEIPT, collection, prepare
+from tests.support.reconciliation_source_audit import account_hint, audit_sources, main
 
 
 def run_audit(store, manifest, **kwargs):

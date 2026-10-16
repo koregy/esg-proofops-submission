@@ -966,7 +966,7 @@ def test_collection_manifest_rejects_duplicate_sources():
 
 
 def test_end_to_end_collection_cli_integration(tmp_path: Path, manifest_schema: dict):
-    from evaluation.reconciliation_collect import collect
+    from tests.support.reconciliation_collect import collect
 
     store = ArtifactStore(tmp_path / "artifacts")
     stmt_payload = {

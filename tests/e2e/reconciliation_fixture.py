@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from evaluation.reconciliation_fixtures import build_case
+from tests.support.reconciliation_fixtures import build_case
 
 
 def _replace(value, mapping):

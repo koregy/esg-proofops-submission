@@ -5,10 +5,10 @@ import pytest
 from proofops.application.claims import ExtractionProfile
 from proofops.domain.provenance import canonical_hash
 
-from evaluation.report_demo import build_demo, render_demo
 from tests.acceptance.test_claims import COMPOUND, graph_of
 from tests.acceptance.test_rules import pack
 from tests.integration.test_section_pipeline import section_map
+from tests.support.report_demo import build_demo, render_demo
 
 
 def inputs():
@@ -74,7 +74,7 @@ def test_demo_escapes_report_text():
 
 
 def test_agent_review_is_source_bound_display_only():
-    from evaluation.report_demo import attach_agent_review
+    from tests.support.report_demo import attach_agent_review
 
     demo = build_demo(*inputs())
     demo["artifact_sha256"] = canonical_hash(demo)
@@ -124,12 +124,12 @@ def test_table_notes_reach_value_review_without_cross_year_leak_or_approval():
 
     from proofops.application.ingest.graph_fusion import fuse_candidates
 
-    from evaluation.html_table_cells import parse_table_cells
-    from evaluation.report_demo import attach_table_notes
-    from evaluation.table_notes import prepare, validate
-    from evaluation.table_numeric_candidates import discover_table_candidates
     from tests.acceptance.test_parsing import TENANT, pdf
     from tests.acceptance.test_tables import table
+    from tests.support.html_table_cells import parse_table_cells
+    from tests.support.report_demo import attach_table_notes
+    from tests.support.table_notes import prepare, validate
+    from tests.support.table_numeric_candidates import discover_table_candidates
 
     source = pdf()
     rows = [["지표", "단위", "2024", "2025"], ["배출량", "tCO2e", "1", "2"]]

@@ -16,8 +16,8 @@ import {PartialClaimSummary} from CLAIMS;
 import assert from 'node:assert/strict';
 const ref={source_id:'s',page_num:48,quote:'재생에너지 <b>조달</b> 확대',
 verification_state:'verified'};
-const yearRef={...ref,source_id:'year',quote:'2040년까지 탄소중립',page_num:47};
-const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',evidence_refs:[yearRef]},
+const elements=[{element_id:'G1',state:'present',normalized_value:'2040년',
+ evidence_refs:[{...ref,quote:'2040년'}]},
  {element_id:'G6',state:'unknown',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G4',state:'conflict',normalized_value:null,evidence_refs:[ref]},
  {element_id:'G3',state:'unknown',normalized_value:null,evidence_refs:[]}];
@@ -32,15 +32,17 @@ for(const decision of [null,{decision_status:'not_run',missing_elements:[],gap_i
  assert.ok(!html.includes('<b>조달</b>'));
  assert.ok(!html.includes('미검증 근거 후보'));
 }
+// A present tag without verified source evidence must not become a displayed fact.
+for (const refs of [[], [{...ref,verification_state:'candidate'}]]) {
+ const html=render(null,null,[{...elements[0],evidence_refs:refs}]);
+ assert.ok(!html.includes('2040년'));
+}
 const approval=render(null,{blocked_reason:'DOMAIN_RULEPACK_UNAPPROVED',
 blocked_action:'판정기준 승인이 필요합니다.'});
 assert.ok(approval.includes('판정기준 승인이 필요합니다.'));
 assert.ok(!approval.includes('DOMAIN_RULEPACK_UNAPPROVED'));
 assert.equal(render({decision_status:'decided'},null), '');
-assert.ok(render(null,null,[]).includes('확인된 사실이 기록되지 않았습니다'));
-const unsupported=render(null,null,[{...elements[0],evidence_refs:[]}]);
-assert.ok(!unsupported.includes('2040년'));
-assert.ok(unsupported.includes('확인된 사실이 기록되지 않았습니다'));
+assert.ok(render(null,null,[]).includes('아직 없습니다'));
 console.log('partial summary passed');
 """
     for key, path in {

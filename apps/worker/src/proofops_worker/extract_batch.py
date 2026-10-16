@@ -49,6 +49,7 @@ def run_batches(
     run_id: str,
     batches: int,
     max_calls: int | None = None,
+    on_batch=None,
 ) -> list[dict]:
     """Run at most ``batches`` continuation batches, stopping on the first halt."""
     if type(batches) is not int or not 1 <= batches <= 100:
@@ -61,6 +62,8 @@ def run_batches(
     for index in range(batches):
         summary = runner.run_batch(tenant_id=tenant_id, run_id=run_id, max_calls=max_calls)
         results.append(dict(summary, batch=index + 1))
+        if on_batch is not None:
+            on_batch(summary)
         # Emit one flushed progress line per settled batch, before the next batch
         # runs, so a long run reports movement instead of buffering until complete.
         # Only whitelisted scalar telemetry is published: counts derive from the
@@ -88,6 +91,22 @@ def run_batches(
             flush=True,
         )
         if summary["status"] in _STOP_STATUSES or summary.get("stop_code"):
+            break
+        from proofops.adapters.local.verified_read_cache import _execution_policy
+        from proofops.application.analysis_profile import (
+            S3_VERIFIED_READ_V13_POLICY,
+            VERIFIED_READ_V11_POLICY,
+            VERIFIED_READ_V12_POLICY,
+        )
+
+        if (
+            _execution_policy()
+            in (VERIFIED_READ_V11_POLICY, VERIFIED_READ_V12_POLICY, S3_VERIFIED_READ_V13_POLICY)
+            and summary["status"] == "committed"
+            and summary.get("pending_after") == []
+        ):
+            # The committed revision already proves its sources. Tagging and
+            # publication still verify them; no extra batch can discover work.
             break
     return results
 

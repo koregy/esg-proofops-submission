@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 
-from evaluation.section_pipeline import SectionSearch
 from tests.acceptance.test_claims import COMPOUND, TENANT, graph_of
 from tests.integration.test_section_pipeline import section_map
+from tests.support.section_pipeline import SectionSearch
 
 
 @pytest.mark.parametrize(

@@ -1,8 +1,8 @@
 import json
 
-from evaluation.atomic_pilot import extract_selected
 from tests.acceptance.test_claims import COMPOUND, TENANT, graph_of
 from tests.integration.test_section_pipeline import section_map
+from tests.support.atomic_pilot import extract_selected
 
 
 def test_exact_atomic_spans_and_invalid_model_output_stay_source_bound(tmp_path):
@@ -68,7 +68,7 @@ def test_context_only_sentence_cannot_become_new_claim(tmp_path):
 
 
 def test_replay_preserves_omissions_without_network_and_refuses_changed_prompt(tmp_path):
-    from evaluation.atomic_pilot import ReplayClient
+    from tests.support.atomic_pilot import ReplayClient
 
     graph = graph_of(COMPOUND)
     source = graph.blocks[0].source_id
@@ -102,7 +102,7 @@ def test_candidate_artifact_must_match_original_source():
 
     import pytest
 
-    from evaluation.atomic_pilot import selected_targets
+    from tests.support.atomic_pilot import selected_targets
 
     graph = graph_of(COMPOUND)
     block = graph.blocks[0]

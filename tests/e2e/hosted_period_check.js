@@ -1,5 +1,4 @@
 async page => {
-  const base = page.url().startsWith('http') ? new URL(page.url()).origin : 'http://127.0.0.1:5207';
   const calls = [];
   let scope = {
     revision: 1,
@@ -37,7 +36,7 @@ async page => {
     else throw new Error(`Unexpected hosted request: ${path}`);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
   });
-  await page.goto(`${base}/analyze`);
+  await page.goto('http://127.0.0.1:5197/analyze');
   await page.locator('input[type=file]').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\nsynthetic UI fixture') });
   await page.getByRole('button', { name: '업로드', exact: true }).click();
   await page.getByLabel('보고연도', { exact: true }).waitFor();

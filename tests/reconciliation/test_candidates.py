@@ -18,7 +18,7 @@ from proofops.adapters.dart.candidates import (
 from proofops.adapters.reconciliation import FileSourceReader
 from proofops.adapters.reconciliation.files import SourceReadError
 
-from evaluation.reconciliation_prepare import prepare_review_draft
+from tests.support.reconciliation_prepare import prepare_review_draft
 
 CORP = "00126380"
 FY = 2024

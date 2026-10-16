@@ -25,7 +25,7 @@ def case():
 
 
 def test_atomic_rows_split_calls_and_preserve_unassigned_status_and_source_spans():
-    from evaluation.table_atomic_claims import prepare, validate
+    from tests.support.table_atomic_claims import prepare, validate
 
     graph, ids = case()
     packets = prepare(graph, [ids["r1c1"], ids["r2c1"]], tenant_id=TENANT)
@@ -61,7 +61,7 @@ def test_atomic_rows_split_calls_and_preserve_unassigned_status_and_source_spans
     "bad", ["rewrite", "duplicate", "context", "omit", "grade", "tamper", "tenant"]
 )
 def test_atomic_rejects_untrusted_output_or_packet(bad):
-    from evaluation.table_atomic_claims import prepare, validate
+    from tests.support.table_atomic_claims import prepare, validate
 
     graph, ids = case()
     packet = prepare(graph, [ids["r1c1"]], tenant_id=TENANT)[0]
@@ -87,8 +87,8 @@ def test_atomic_rejects_untrusted_output_or_packet(bad):
 
 
 def test_empty_extraction_remains_unknown_and_reuses_dimension_contract():
-    from evaluation.claim_dimensions import prepare_dimensions
-    from evaluation.table_atomic_claims import prepare, validate
+    from tests.support.claim_dimensions import prepare_dimensions
+    from tests.support.table_atomic_claims import prepare, validate
 
     graph, ids = case()
     packet = prepare(graph, [ids["r2c1"]], tenant_id=TENANT)[0]
@@ -109,7 +109,7 @@ def test_empty_extraction_remains_unknown_and_reuses_dimension_contract():
 
 
 def test_runner_preserves_unknown_and_stops_after_transport_failure(tmp_path):
-    from evaluation.table_atomic_claims import run
+    from tests.support.table_atomic_claims import run
 
     class Client:
         model = "test-only"
@@ -135,7 +135,7 @@ def test_runner_preserves_unknown_and_stops_after_transport_failure(tmp_path):
 
 
 def test_document_rows_rebind_only_unique_same_row_literal_quotes():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph, ids = case()
     payload = {
@@ -166,7 +166,7 @@ def test_document_rows_rebind_only_unique_same_row_literal_quotes():
 
 
 def test_document_row_heading_mismatch_does_not_search_the_whole_document():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph, ids = case()
     result = bind_document_rows(
@@ -184,7 +184,7 @@ def test_document_row_heading_mismatch_does_not_search_the_whole_document():
 
 
 def test_document_quote_glyph_alignment_preserves_source_and_model_quotes():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph = fuse_candidates(
         (table([["과제", "내용"], ["재활용", "전국 ‘재활용품 회수’ 거점 연동 완료"]]),),
@@ -207,7 +207,7 @@ def test_document_quote_glyph_alignment_preserves_source_and_model_quotes():
 
 
 def test_document_quote_alignment_does_not_resolve_ambiguous_sources_or_changed_numbers():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     for cells, quote in [
         (["'재활용' 10% 확대", "‘재활용’ 10% 확대"], "'재활용' 10% 확대"),
@@ -230,7 +230,7 @@ def test_document_quote_alignment_does_not_resolve_ambiguous_sources_or_changed_
 
 
 def test_document_binding_excludes_merged_header_rows_and_aligns_whole_headings():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph = fuse_candidates(
         (
@@ -261,7 +261,7 @@ def test_document_binding_excludes_merged_header_rows_and_aligns_whole_headings(
 
 
 def test_document_coverage_exposes_omitted_cells_and_partial_status_without_absence():
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph, ids = case()
     payload = {
@@ -291,7 +291,7 @@ def test_document_coverage_exposes_omitted_cells_and_partial_status_without_abse
 def test_document_coverage_preserves_conflicted_source_cells():
     from dataclasses import replace
 
-    from evaluation.table_atomic_claims import bind_document_rows
+    from tests.support.table_atomic_claims import bind_document_rows
 
     graph, ids = case()
     graph = replace(

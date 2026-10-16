@@ -11,7 +11,7 @@ from proofops.application.ingest.graph_fusion import (
 )
 from proofops.domain.documents import NativeSource, PageGeometry
 
-from evaluation.context_extraction import (
+from tests.support.context_extraction import (
     CONTEXT_SYSTEM,
     build_context_packet,
     validate_target_quotes,

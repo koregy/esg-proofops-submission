@@ -14,7 +14,7 @@ from tests.acceptance.test_parsing import FOREIGN, TENANT, candidate, pdf
 
 
 def test_raster_request_and_receipt_replay_reject_tampering(monkeypatch):
-    from evaluation.raster_ocr import prepare_raster_ocr, replay_raster_ocr
+    from tests.support.raster_ocr import prepare_raster_ocr, replay_raster_ocr
 
     source = pdf()
     batch = replace(

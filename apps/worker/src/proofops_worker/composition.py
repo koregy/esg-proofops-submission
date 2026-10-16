@@ -30,6 +30,9 @@ def build_composition(
     verify_paragraphs: bool = False,
     native_typography_tolerance: bool = False,
     raster_ocr: bool = False,
+    provider_factories=None,
+    provider_ledgers=None,
+    claim_progress=None,
 ) -> LocalParserRunner | LocalExtractRunner | LocalTagRunner:
     if type(native_typography_tolerance) is not bool or (
         native_typography_tolerance and (not verify_paragraphs or stage != "parse" or raster_ocr)
@@ -47,10 +50,10 @@ def build_composition(
     if stage not in {"parse", "extract", "tag"}:
         raise ValueError("STAGE_INVALID")
     try:
-        max_workers = int(os.environ.get("LOCAL_LLM_MAX_WORKERS", "16"))
+        max_workers = int(os.environ.get("LOCAL_LLM_MAX_WORKERS", "8"))
     except ValueError:
         raise ValueError("LOCAL_LLM_CONFIGURATION_INVALID") from None
-    if not 1 <= max_workers <= 16:
+    if not 1 <= max_workers <= 24:
         raise ValueError("LOCAL_LLM_CONFIGURATION_INVALID")
     if stage == "tag" and os.environ.get("LOCAL_TAGGING_MODE") not in {
         None,
@@ -65,7 +68,10 @@ def build_composition(
     }:
         raise ValueError("EXPLICIT_LOCAL_SYNTHETIC_EXTRACTION_REQUIRED")
     note_ledger = Path(__file__).resolve().parents[4] / ".local/upstage/budget.sqlite3"
+    openai_ledger = Path(__file__).resolve().parents[4] / ".local/openai/budget.sqlite3"
     luna_ledger = Path(__file__).resolve().parents[4] / ".local/openrouter/budget.sqlite3"
+    if provider_ledgers is not None:
+        note_ledger, luna_ledger = provider_ledgers
     if raster_ocr and not note_ledger.is_file():
         raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
     build_proofops_composition(
@@ -96,12 +102,16 @@ def build_composition(
 
         raster_probe = UpstageParseProbe(os.environ.get("UPSTAGE_API_KEY", ""), note_ledger)
     upstage_probe = None
-    if profile.parser_mode == "upstage":
+    if profile.parser_mode in ("upstage", "mixed-v1"):
         from proofops.adapters.local.upstage_parse import UpstageParseProbe
 
         if not note_ledger.is_file():
             raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
-        upstage_probe = UpstageParseProbe(os.environ.get("UPSTAGE_API_KEY", ""), note_ledger)
+        upstage_probe = (
+            provider_factories["parse"](note_ledger)
+            if provider_factories
+            else UpstageParseProbe(os.environ.get("UPSTAGE_API_KEY", ""), note_ledger)
+        )
     runner = LocalParserRunner(
         LocalSQLiteRunStore(database),
         uploads,
@@ -123,6 +133,7 @@ def build_composition(
 
         live_factory = None
         if os.environ.get("LOCAL_TAGGING_MODE") == "upstage_local":
+            from proofops.adapters.local.openai import OpenAIProbe
             from proofops.adapters.local.openrouter import MODEL as LUNA_MODEL
             from proofops.adapters.local.openrouter import OpenRouterProbe
             from proofops.adapters.local.upstage import MODEL_PRO4, UpstageProbe
@@ -130,16 +141,33 @@ def build_composition(
             from proofops_worker.live_tagging import LiveTaggingRuntime
 
             def live_factory(owner, snapshot, graph, lease, usage):
+                if provider_factories and "decision_settings" in snapshot:
+                    # Hosted profiles do not authorize Decisions transports. Never
+                    # silently compose research ledgers/keys from a hosted worker.
+                    raise ValueError("HOSTED_DECISION_BINDING_UNAVAILABLE")
                 model = snapshot["tagging_settings"]["model_id"]
                 if model == LUNA_MODEL:
                     ledger = luna_ledger
-                    probe = OpenRouterProbe(
+                    probe = (provider_factories["llm"] if provider_factories else OpenRouterProbe)(
                         os.environ.get("OPENROUTER_API_KEY", ""),
                         ledger,
                         wire_policy_version=snapshot["tagging_settings"].get(
                             "wire_policy_version", 1
                         ),
                     )
+                elif model == "gpt-6-luna":
+                    if provider_factories:
+                        ledger = luna_ledger
+                        probe = provider_factories["llm"](
+                            os.environ.get("OPENAI_API_KEY", ""),
+                            ledger,
+                            wire_policy_version=2,
+                        )
+                    else:
+                        if not openai_ledger.is_file():
+                            raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
+                        ledger = openai_ledger
+                        probe = OpenAIProbe(os.environ.get("OPENAI_API_KEY", ""), ledger)
                 elif model == MODEL_PRO4:
                     if not note_ledger.is_file():
                         raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
@@ -168,12 +196,14 @@ def build_composition(
             else None,
             live_factory=live_factory,
             max_workers=max_workers,
+            claim_progress=claim_progress,
         )
     if stage == "extract":
         from proofops_agent.extraction import SyntheticClaimExtractor
 
         extractor: ClaimExtractorPort = SyntheticClaimExtractor()
         if os.environ.get("LOCAL_EXTRACTION_MODE") == "upstage_probe":
+            from proofops.adapters.local.openai import OpenAIProbe
             from proofops.adapters.local.openrouter import MODEL as LUNA_MODEL
             from proofops.adapters.local.openrouter import OpenRouterProbe
             from proofops.adapters.local.upstage import MODEL, MODEL_PRO4, UpstageProbe
@@ -183,7 +213,7 @@ def build_composition(
             )
 
             # The existing user-authorized ledger must exist; never mint another allowance.
-            ledger = Path(__file__).resolve().parents[4] / ".local/upstage/budget.sqlite3"
+            ledger = note_ledger
             settings_path = os.environ.get("LOCAL_RUN_SETTINGS_PATH")
             if not settings_path:
                 raise ValueError("LOCAL_RUN_SETTINGS_REQUIRED")
@@ -203,6 +233,7 @@ def build_composition(
                         (MODEL_PRO4, 1),
                         (LUNA_MODEL, 1),
                         (LUNA_MODEL, 2),
+                        ("gpt-6-luna", 2),
                     )
                     if _profile_with_options(m, wire_policy_version=version).model_sha256
                     == frozen_model_hash
@@ -213,19 +244,66 @@ def build_composition(
                 raise ValueError("EXTRACTION_PROFILE_MISMATCH")
             model, wire_policy_version = model_match
             if model == LUNA_MODEL:
-                probe = OpenRouterProbe(
+                probe = (provider_factories["llm"] if provider_factories else OpenRouterProbe)(
                     os.environ.get("OPENROUTER_API_KEY", ""),
                     luna_ledger,
                     wire_policy_version=wire_policy_version,
                 )
+            elif model == "gpt-6-luna":
+                if provider_factories:
+                    probe = provider_factories["llm"](
+                        os.environ.get("OPENAI_API_KEY", ""),
+                        luna_ledger,
+                        wire_policy_version=2,
+                    )
+                else:
+                    if not openai_ledger.is_file():
+                        raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
+                    probe = OpenAIProbe(os.environ.get("OPENAI_API_KEY", ""), openai_ledger)
             else:
                 if not ledger.is_file():
                     raise ValueError("SHARED_BUDGET_LEDGER_REQUIRED")
                 probe = UpstageProbe(os.environ.get("UPSTAGE_API_KEY", ""), ledger, model=model)
+            display_profile = None
+            if "display_text_policy" in settings:
+                from proofops.application.ingest.display_text import POLICY, PROFILE
+
+                if settings["display_text_policy"] != POLICY:
+                    raise ValueError("DISPLAY_POLICY_MISMATCH")
+                display_profile = PROFILE
             year_notation = settings.get("extraction_year_notation") is True
             context_opt_in = settings.get("extraction_context") is True
             table_context_opt_in = settings.get("extraction_table_context") is True
+            rows_opt_in = settings.get("extraction_table_rows", False)
+            recall_opt_in = settings.get("extraction_recall_prompt", False)
+            if type(rows_opt_in) is not bool or type(recall_opt_in) is not bool:
+                raise ValueError("EXTRACTION_PROFILE_MISMATCH")
             source_ids_opt_in = settings.get("extraction_source_ids") is True
+            atomic_opt_in = settings.get("extraction_atomic") is True
+            atomic_v3_opt_in = settings.get("extraction_atomic_v3") is True
+            failure_diagnostics_opt_in = settings.get("extraction_failure_diagnostics") is True
+            linewrap_join = settings.get("extraction_linewrap_join") is True
+            fragment_guard = settings.get("extraction_fragment_guard", False)
+            if type(fragment_guard) is not bool:
+                raise ValueError("UPSTAGE_EXTRACTION_FRAGMENT_GUARD_INVALID")
+            if "extraction_linewrap_join" in settings and (
+                not linewrap_join
+                or settings.get("extraction_source_ids") is not True
+                or atomic_opt_in
+            ):
+                raise ValueError("EXTRACTION_PROFILE_MISMATCH")
+            if "extraction_atomic" in settings and (
+                not atomic_opt_in or settings.get("extraction_source_ids") is not True
+            ):
+                raise ValueError("EXTRACTION_PROFILE_MISMATCH")
+            if "extraction_atomic_v3" in settings and (
+                not atomic_v3_opt_in or not (atomic_opt_in or rows_opt_in) or not source_ids_opt_in
+            ):
+                raise ValueError("EXTRACTION_PROFILE_MISMATCH")
+            if "extraction_failure_diagnostics" in settings and (
+                not failure_diagnostics_opt_in or not source_ids_opt_in
+            ):
+                raise ValueError("EXTRACTION_PROFILE_MISMATCH")
             assertion_prompt_opt_in = settings.get("extraction_assertion_prompt") is True
             complete_selection_opt_in = settings.get("extraction_complete_selection") is True
             content_bounds_opt_in = settings.get("extraction_content_bounds") is True
@@ -234,7 +312,14 @@ def build_composition(
             position_order = settings.get("position_context_order") == CONTEXT_POSITION_ORDER
             if settings.get("position_context_order") is not None and not position_order:
                 raise ValueError("EXTRACTION_CONTEXT_ORDER_MISMATCH")
-            if year_notation or context_opt_in or source_ids_opt_in:
+            if (
+                year_notation
+                or context_opt_in
+                or source_ids_opt_in
+                or display_profile
+                or atomic_v3_opt_in
+                or failure_diagnostics_opt_in
+            ):
                 # New-run opt-in only: the frozen settings must carry the exact
                 # option-combination profile hash, otherwise fail closed.
                 if frozen_profile != asdict(
@@ -244,11 +329,50 @@ def build_composition(
                         extraction_context=context_opt_in,
                         extraction_table_context=table_context_opt_in,
                         source_ids=source_ids_opt_in,
+                        extraction_atomic=atomic_opt_in,
+                        extraction_atomic_v3=atomic_v3_opt_in,
+                        extraction_failure_diagnostics=failure_diagnostics_opt_in,
+                        extraction_linewrap_join=linewrap_join,
+                        extraction_fragment_guard=fragment_guard,
+                        extraction_sentence_prefix=settings.get(
+                            "extraction_sentence_prefix", False
+                        ),
+                        extraction_k1=settings.get("extraction_k1", False),
+                        extraction_table_footnotes=settings.get(
+                            "extraction_table_footnotes", False
+                        ),
+                        extraction_located_table_context=settings.get(
+                            "extraction_located_table_context", False
+                        ),
+                        extraction_pb1=settings.get("extraction_pb1", False),
+                        extraction_w9=settings.get("extraction_w9", False),
+                        extraction_j3=settings.get("extraction_j3", False),
+                        extraction_k3=settings.get("extraction_k3", False),
+                        extraction_j7=settings.get("extraction_j7", False),
+                        extraction_j8=settings.get("extraction_j8", False),
+                        extraction_i3_wire=settings.get("extraction_i3_wire", False),
+                        extraction_i4_identity=settings.get("extraction_i4_identity", False),
+                        extraction_fxg_split=settings.get("extraction_fxg_split", False),
+                        extraction_qt1_goal_split=settings.get("extraction_qt1_goal_split", False),
+                        extraction_qc_native_figures=settings.get(
+                            "extraction_qc_native_figures", False
+                        ),
+                        extraction_h1=settings.get("extraction_h1", False),
+                        extraction_i5_tables=settings.get("extraction_i5_tables", False),
+                        extraction_k6=settings.get("extraction_k6", False),
+                        extraction_q1=settings.get("extraction_q1", False),
+                        extraction_qt1=settings.get("extraction_qt1", False),
+                        extraction_pb1_context_guard=settings.get(
+                            "extraction_pb1_context_guard", False
+                        ),
+                        extraction_table_rows=rows_opt_in,
+                        extraction_recall_prompt=recall_opt_in,
                         assertion_prompt=assertion_prompt_opt_in,
                         complete_selection=complete_selection_opt_in,
                         extraction_content_bounds=content_bounds_opt_in,
                         position_order=position_order,
                         wire_policy_version=wire_policy_version,
+                        display_text_profile=display_profile,
                     )
                 ):
                     raise ValueError("EXTRACTION_PROFILE_MISMATCH")
@@ -260,13 +384,50 @@ def build_composition(
                     extraction_context=context_opt_in,
                     extraction_table_context=table_context_opt_in,
                     extraction_source_ids=source_ids_opt_in,
+                    extraction_atomic=atomic_opt_in,
+                    extraction_atomic_v3=atomic_v3_opt_in,
+                    extraction_failure_diagnostics=failure_diagnostics_opt_in,
+                    extraction_linewrap_join=linewrap_join,
+                    extraction_fragment_guard=fragment_guard,
+                    extraction_sentence_prefix=settings.get("extraction_sentence_prefix", False),
+                    extraction_k1=settings.get("extraction_k1", False),
+                    extraction_table_footnotes=settings.get("extraction_table_footnotes", False),
+                    extraction_located_table_context=settings.get(
+                        "extraction_located_table_context", False
+                    ),
+                    extraction_pb1=settings.get("extraction_pb1", False),
+                    extraction_w9=settings.get("extraction_w9", False),
+                    extraction_j3=settings.get("extraction_j3", False),
+                    extraction_k3=settings.get("extraction_k3", False),
+                    extraction_j7=settings.get("extraction_j7", False),
+                    extraction_j8=settings.get("extraction_j8", False),
+                    extraction_i3_wire=settings.get("extraction_i3_wire", False),
+                    extraction_i4_identity=settings.get("extraction_i4_identity", False),
+                    extraction_fxg_split=settings.get("extraction_fxg_split", False),
+                    extraction_qt1_goal_split=settings.get("extraction_qt1_goal_split", False),
+                    extraction_qc_native_figures=settings.get(
+                        "extraction_qc_native_figures", False
+                    ),
+                    extraction_h1=settings.get("extraction_h1", False),
+                    extraction_i5_tables=settings.get("extraction_i5_tables", False),
+                    extraction_k6=settings.get("extraction_k6", False),
+                    extraction_q1=settings.get("extraction_q1", False),
+                    extraction_qt1=settings.get("extraction_qt1", False),
+                    extraction_pb1_context_guard=settings.get(
+                        "extraction_pb1_context_guard", False
+                    ),
+                    extraction_table_rows=rows_opt_in,
+                    extraction_recall_prompt=recall_opt_in,
                     extraction_assertion_prompt=assertion_prompt_opt_in,
                     extraction_complete_selection=complete_selection_opt_in,
                     extraction_content_bounds=content_bounds_opt_in,
                     position_order=position_order,
+                    display_text_profile=display_profile,
                 )
             elif (
-                table_context_opt_in
+                rows_opt_in
+                or recall_opt_in
+                or table_context_opt_in
                 or assertion_prompt_opt_in
                 or complete_selection_opt_in
                 or content_bounds_opt_in
@@ -289,5 +450,11 @@ def build_composition(
             extractor=extractor,
             telemetry=runner.telemetry,
             max_workers=max_workers,
+            tag_composition=lambda: build_composition(
+                stage="tag",
+                provider_factories=provider_factories,
+                provider_ledgers=provider_ledgers,
+                claim_progress=claim_progress,
+            ),
         )
     return runner

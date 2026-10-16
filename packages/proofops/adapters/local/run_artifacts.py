@@ -35,6 +35,7 @@ def load_run_inputs(store, uploads, *, tenant_id: str, run_id: str):
         document["sha256"],
         document["object_version_id"],
         content,
+        upload_security_limits=document.get("upload_security", {}).get("limits"),
     )
     pages = snapshot["selected_pages"]
     if not pages or any(type(p) is not int or not 1 <= p <= document["page_count"] for p in pages):
@@ -205,6 +206,10 @@ def accepted_native_policy_digests():
     present and hash-verified, so this never allowlists a bare hash.
     """
     digests = {canonical_hash(native_paragraph_policy())}
+    from proofops.adapters.local.claim_source_policies import PAGE_OCR_PROFILES, page_ocr_profile
+
+    for profile in PAGE_OCR_PROFILES:
+        digests.add(canonical_hash(page_ocr_profile(profile).native_policy()))
     from proofops.adapters.local import frozen_native_replay
 
     for bundle in frozen_native_replay._PINNED_VERIFIERS.values():
@@ -319,7 +324,14 @@ def checkpoint_native_attestation(envelope):
         or not isinstance(receipt.get("parse_manifest_id"), str)
         or not isinstance(receipt.get("source_sha256"), str)
         or not isinstance(receipt.get("input_graph_sha256"), str)
-        or policy_digest not in accepted_native_policy_digests()
+        # The fresh base digest is always in the accepted set. Avoid constructing
+        # every archived OCR policy inside the commit transaction for that case;
+        # registry construction can outlast a short parser lease after keepalive
+        # has stopped. Historical digests retain the full byte-verified check.
+        or (
+            policy_digest != canonical_hash(native_paragraph_policy())
+            and policy_digest not in accepted_native_policy_digests()
+        )
     ):
         raise ParseFailure("NATIVE_PARAGRAPH_CHECKPOINT_INVALID")
     return receipt
@@ -393,7 +405,13 @@ def load_run_evidence(store, uploads, parser, *, tenant_id: str, run_id: str):
         validate_raster_checkpoint_bindings(db, store.jobs, message, snapshot, envelope)
     policy = store.jobs.parser_note_policy(message)
     native_policy = store.jobs.parser_native_policy(message)
+    from proofops.adapters.local.claim_source_policies import PAGE_OCR_PROFILES
+
     if native_policy is not None:
+        if native_policy.get("mode") in PAGE_OCR_PROFILES and (
+            native_receipt is None or native_receipt.get("run_id") != run_id
+        ):
+            raise ParseFailure("NATIVE_PARAGRAPH_CHECKPOINT_INVALID")
         if (
             envelope.get("schema")
             not in {
@@ -450,6 +468,18 @@ def load_run_evidence(store, uploads, parser, *, tenant_id: str, run_id: str):
     graph = parser.load_verified(
         source, profile, tenant_id=tenant_id, manifest_sha256=envelope["manifest_sha256"]
     )
+    if profile.parser_mode == "mixed-v1":
+        directory = (
+            parser.artifact_root
+            / tenant_id
+            / source.document_version_id
+            / profile.parse_manifest_id
+        )
+        manifest = json.loads((directory / "manifest.json").read_bytes())
+        if envelope.get("page_parser_provenance") != manifest["page_parser_provenance"]:
+            raise ParseFailure("MIXED_PARSER_CHECKPOINT_MISMATCH")
+    elif "page_parser_provenance" in envelope:
+        raise ParseFailure("MIXED_PARSER_CHECKPOINT_MISMATCH")
     base_graph = graph
     if note_reviews:
         from proofops.adapters.local.table_notes import replay_note_reviews
@@ -492,13 +522,70 @@ def load_run_evidence(store, uploads, parser, *, tenant_id: str, run_id: str):
             raise ParseFailure("RASTER_OCR_REPLAY_INVALID") from None
     elif native_receipt is not None:
         from proofops.adapters.local.frozen_native_replay import replay_native_with_policy
+        from proofops.adapters.local.verified_read_cache import replay_cached as replay_verified
+
+        def replay_native(r, g, s, *, tenant_id):
+            if (native_policy or {}).get("mode") in PAGE_OCR_PROFILES:
+                from proofops.adapters.local.claim_source_policies import page_ocr_profile
+
+                hx4 = page_ocr_profile(native_policy["mode"], policy=native_policy, native=True)
+
+                if native_policy != hx4.native_policy():
+                    raise ValueError("OCR_POLICY_OR_RUN_MISMATCH")
+                return hx4.for_run(r["run_id"]).replay_native_sources(r, g, s, tenant_id=tenant_id)
+            if (native_policy or {}).get("mode") == "upstage-ocr-page-v15":
+                from proofops.adapters.local import upstage_ocr_profile_v15 as h7
+
+                if native_policy != h7.native_policy():
+                    raise ValueError("OCR_POLICY_OR_RUN_MISMATCH")
+                return h7.for_run(r["run_id"]).replay_native_sources(r, g, s, tenant_id=tenant_id)
+            if (native_policy or {}).get("mode") == "upstage-ocr-page-v14":
+                from proofops.adapters.local import upstage_ocr_profile_v14 as h6
+
+                if native_policy != h6.native_policy():
+                    raise ValueError("OCR_POLICY_OR_RUN_MISMATCH")
+                return h6.for_run(r["run_id"]).replay_native_sources(r, g, s, tenant_id=tenant_id)
+            return replay_native_with_policy(native_policy, r, g, s, tenant_id=tenant_id)
 
         try:
-            graph = replay_native_with_policy(
-                native_policy, native_receipt, graph, source.content, tenant_id=tenant_id
+            graph = replay_verified(
+                reader_name="native:" + str((native_policy or {}).get("mode")),
+                policy=native_policy,
+                receipt=native_receipt,
+                graph=graph,
+                source=source.content,
+                tenant_id=tenant_id,
+                recompute=replay_native,
             )
         except (ValueError, TypeError, KeyError):
             raise ParseFailure("NATIVE_PARAGRAPH_REPLAY_INVALID") from None
+    if "evidence_source_policy" in snapshot:
+        from proofops.adapters.local.evidence_source_policies import evidence_source_reader
+
+        try:
+            ev1 = evidence_source_reader(snapshot["evidence_source_policy"])
+            if (
+                snapshot["evidence_source_policy"] != ev1.policy()
+                or envelope.get("evidence_source_policy_sha256") != canonical_hash(ev1.policy())
+                or list(envelope["evidence_source_attestation"]["physical_pages"])
+                != sorted(set(profile.physical_pages) - set(profile.claim_physical_pages))
+            ):
+                raise ValueError("EVIDENCE_SOURCE_POLICY_MISMATCH")
+            from proofops.adapters.local.verified_read_cache import replay_cached as replay_verified
+
+            graph = replay_verified(
+                reader_name=ev1.__name__,
+                policy=ev1.policy(),
+                receipt=envelope["evidence_source_attestation"],
+                graph=graph,
+                source=source.content,
+                tenant_id=tenant_id,
+                recompute=ev1.replay_evidence_sources,
+            )
+        except (ValueError, TypeError, KeyError):
+            raise ParseFailure("EVIDENCE_SOURCE_REPLAY_INVALID") from None
+    elif "evidence_source_attestation" in envelope:
+        raise ParseFailure("UNPINNED_EVIDENCE_SOURCE_ATTESTATION")
     typography_digest = envelope.get("native_paragraph_typography_policy_sha256")
     typography_proof = envelope.get("native_paragraph_typography_proof")
     recomputed_typography_proof = None
@@ -531,7 +618,33 @@ def load_run_evidence(store, uploads, parser, *, tenant_id: str, run_id: str):
         validate_automatic_note_reviews(
             graph, note_reviews, policy, selected_pages=profile.physical_pages
         )
+    from proofops.adapters.local.receipt_environment_compat import (
+        receipt_read_metadata,
+        table_read_metadata,
+    )
+
+    # Parser checkpoint hashes describe the original graph. QC2 derives only a
+    # new discovery graph after all original-source replay checks have passed;
+    # extraction, tagging and historical claim reads must use the same projection.
+    if snapshot.get("analysis_profile_policy", {}).get("native_figure_policy"):
+        from proofops.adapters.local.h1_native_title import native_figure_candidates
+        from proofops.application.analysis_profile import policy_for
+        from proofops.application.ingest.k6_coverage import FIGURE_POLICY
+
+        selected = policy_for(
+            snapshot["pipeline_profile"], pinned_hash=snapshot["analysis_profile_policy_sha256"]
+        )
+        if selected.get("native_figure_policy") != FIGURE_POLICY or selected.get(
+            "native_figure_policy_sha256"
+        ) != canonical_hash(FIGURE_POLICY):
+            raise ParseFailure("QC_NATIVE_FIGURE_PROFILE_MISMATCH")
+        graph, _ = native_figure_candidates(graph, source.content)
+
+    compatibility = [table_read_metadata(graph)]
+    if native_receipt is not None:
+        compatibility.append(receipt_read_metadata(native_receipt))
     return dict(
+        receipt_read_compatibility=[item for item in compatibility if item is not None],
         graph=graph,
         base_graph=base_graph,
         source=source,
