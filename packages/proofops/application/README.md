@@ -1,0 +1,12 @@
+# 애플리케이션
+
+업로드부터 근거 구성·태깅·검토·내보내기까지의 흐름을 조정합니다. 외부 구현과의 경계는 [ports](ports/)에 있습니다.
+
+- [claims.py](claims.py): 원자 단위 주장 추출·발견.
+- [ingest/graph_fusion.py](ingest/graph_fusion.py): 파서 산출물과 출처를 문서 그래프로 구성.
+- [evidence/retrieval.py](evidence/retrieval.py), [binding.py](evidence/binding.py): 근거 묶음과 인용 연결.
+- [tagging/service.py](tagging/service.py), [consensus.py](tagging/consensus.py): 독립 태깅과 합의 구성.
+- [analysis_profile.py](analysis_profile.py): 분석 정책과 해시 선택.
+- [reviews.py](reviews.py), [exports.py](exports.py): 태깅 검토와 결과 내보내기.
+
+태깅에서 판정으로 이어지는 흐름은 [worker/tag_runner.py](../../../apps/worker/src/proofops_worker/tag_runner.py)와 함께 읽습니다. 저장된 정책과 결과는 기존 실행을 재현할 때 그대로 사용합니다.
