@@ -18,3 +18,19 @@ export function documentName(document: DocumentMetadata, uploadedFilename?: stri
     document.original_filename, document.filename, document.title, document.display_name].map(reportTitle).find(Boolean)
     ?? metadataText(document.company_name);
 }
+
+/** Recover legacy upload names only from metadata for the exact same PDF bytes. */
+export function reportNames(documents: (DocumentMetadata & { document_id: string; sha256?: string })[]): Record<string, string | undefined> {
+  const bySha = new Map<string, string>();
+  for (const doc of documents) {
+    const name = documentName(doc);
+    if (doc.sha256 && name && !bySha.has(doc.sha256)) bySha.set(doc.sha256, name);
+  }
+  return Object.fromEntries(documents.map(doc => [doc.document_id, documentName(doc) ?? (doc.sha256 ? bySha.get(doc.sha256) : undefined)]));
+}
+
+export function cleanReportName(name: string): string {
+  const file = name.replace(/^.*[/\\]/, "").replace(/\.pdf$/i, "");
+  const match = /^(.+?)[_ -]+Sustainability[_ -]*Report[_ -]*(20\d{2})(?:[_ -]+(?:KOR|KR|ENG|EN))?$/i.exec(file);
+  return match ? `${match[1].replace(/_/g, " ")} ${match[2]} 지속가능경영보고서` : file.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}

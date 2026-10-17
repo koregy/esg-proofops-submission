@@ -36,7 +36,7 @@ export function claimExplanation(result: HostedResult, claim: ResultClaim) {
   if (item.bucket === "hold") return { text: `판정 보류 · ${w18HoldReason(result, claim) ?? "원문·유형·규칙 확인 필요"}. 보류는 E0이나 근거 부재 판정이 아닙니다.`, rules: [] };
   const decision = confirmedDecision(claim);
   const rules = decision?.rule_ids ?? [];
-  const lead = item.confirmed ? `${trackText[item.track] ?? "해당"} 트랙의 확정 ${item.grade}입니다.` : `${item.grade}는 현재 연결된 근거에 따른 잠정 등급이며 추가 확인이 필요합니다.`;
+  const lead = item.confirmed ? `${trackText[item.track] ?? "해당"} 트랙의 확정 ${item.grade}입니다.` : `이전 버전 결과 · ${item.grade}는 당시 연결된 근거에 따른 등급이며 추가 확인이 필요합니다. 확정 판정이 아닙니다.`;
   const applied = rules.map(id => ruleText[id] ?? `기록된 규칙 ${id}가 적용되었습니다.`).join(" ");
   const present = item.elements.filter(e => e.state === "present" && e.evidence_refs.some(r => r.verification_state === "verified"));
   const absent = item.elements.filter(e => ["absent", "absent_in_scope"].includes(e.state) && !decision?.excluded_elements?.includes(e.element_id));

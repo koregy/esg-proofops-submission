@@ -75,7 +75,7 @@ test("R108 extraction budget hold explains unanalyzed items without claiming mon
 });
 test("server evidence_grade is displayed with range, open elements and hold", () => {
   const summary = gradeSummary(claim);
-  assert.match(summary.headline, /잠정 등급 E1/);
+  assert.match(summary.headline, /추가 확인 필요 · E1/);
   assert.equal(summary.confirmed, false);
   assert.match(summary.note, /E1–E3/);
   assert.match(summary.note, /P3/);
@@ -204,5 +204,5 @@ test('DEC-123: server scope confirmation uses the confirmed label and keeps insp
       { gap_ids: ['GAP-005'] }, { grade_range: { rule_gap: true } }]
       .map(change => ({ sc1_confirmation: { ...scoped.sc1_confirmation, ...change } })),
   ]) assert.equal(gradeSummary({ ...scoped, ...change }).confirmed, false, JSON.stringify(change));
-  assert.equal(gradeSummary({ ...scoped, sc1_confirmation: null }).headline, '잠정 등급 E1 · 추가 확인 필요');
+  assert.equal(gradeSummary({ ...scoped, sc1_confirmation: null }).headline, '추가 확인 필요 · E1');
 });

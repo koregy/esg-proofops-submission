@@ -15,6 +15,16 @@ export type Runtime = {
   provider_limits?: Record<string, { status: "unknown" | "blocked"; remaining_usd: string | null }>;
   limits: { max_upload_bytes: number; selected_pages: number; max_pdf_pages: number; original_days: number; [key: string]: unknown };
 };
+/** Display the server's current limits without inventing missing amounts. */
+export function budgetNotice(limits: Record<string, unknown> = {}): string {
+  const rows = [["run_usd", "실행당"], ["day_usd", "하루"], ["event_usd", "행사 전체"]]
+    .flatMap(([key, label]) => {
+      const value = limits[key];
+      return (typeof value === "string" || typeof value === "number") && /^\d+(?:\.\d+)?$/.test(String(value))
+        ? [`${label} USD ${value}`] : [];
+    });
+  return rows.length ? `분석 비용 한도: ${rows.join(" · ")}` : "분석 비용 한도는 현재 서비스 설정을 따릅니다.";
+}
 export type Session = { user_id: string; tenant_id: string | null; role: string | null; csrf_token: string; expires_at: string };
 export type HostedDocument = DocumentMetadata & { document_id: string; page_count: number; size_bytes: number; expires: number; sha256: string; display_name?: string; company_name?: string };
 export type ListedDocument = HostedDocument & { display_name: string; uploaded_at: string };
@@ -132,7 +142,7 @@ export type HostedResult = {
     provider_concurrency?: { completed_by_role?: Record<string, number> };
     ux1_data?: { table_count?: number | null; model_judgment_calls?: number };
     extraction_outcome?: ExtractionOutcome;
-    scope?: { pages?: number[]; claim_pages?: number[]; declared_subset?: boolean } };
+    scope?: { analysis_profile_sha256?: string; pages?: number[]; claim_pages?: number[]; declared_subset?: boolean } };
   possible_grade_range?: GradeRange | null; confirmed_grade?: string | null;
 };
 export type ResolveBody = {
@@ -496,7 +506,7 @@ export function resultExecution(result?: HostedResult | null, runStatus?: string
   if ([status, result?.pipeline?.status, extraction?.status].some(value => ["partial", "partial_blocked", "blocked", "accounting_pending"].includes(value ?? "")) || extraction?.failed_sources?.length || extraction?.page_failures?.length) {
     return { kind: "partial", title: "부분 완료 · 미처리 범위 확인", meaning: "일부 쪽·원문의 처리가 완료되지 않아 처리된 주장만 표시합니다. 미처리 범위는 아래 안내에서 확인하세요." };
   }
-  if (status === "completed") return { kind: "completed", title: "분석 완료 · 선택 범위", meaning: "선택한 범위의 처리가 끝났습니다. 주장별 확정·잠정·보류 상태와 근거를 확인하세요." };
+  if (status === "completed") return { kind: "completed", title: "분석 완료 · 선택 범위", meaning: "선택한 범위의 처리가 끝났습니다. 주장별 확정·보류 상태와 근거를 확인하세요." };
   if (status === "cancelled") return { kind: "cancelled", title: "실행 취소", meaning: "취소 전 남은 결과만 표시합니다. 처리하지 않은 범위는 판정하지 않았습니다." };
   return { kind: "unknown", title: "실행 상태 확인 필요", meaning: "이 결과만으로 실행 완료 여부를 확인할 수 없습니다." };
 }
