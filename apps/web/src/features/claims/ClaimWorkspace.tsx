@@ -321,7 +321,7 @@ export function PartialClaimSummary({
     <h3 id="partial-summary-heading">검토 중인 내용</h3>
     <p>현재까지 추출된 내용입니다. 최종 판정이나 사람 검토 완료를 뜻하지 않습니다.</p>
     <MissingEvidenceCard facts={presentElements.map(e => `${getElementLabel(e.element_id)}: 서버 태깅 present${e.normalized_value !== null ? ` · 값 ${e.normalized_value}` : ""} (등급 미확정)`)}
-      sources={allSources} reasons={[...(holdReasons ?? []), ...(projection?.blocked_reason ? [projection.blocked_reason] : []), ...(decision?.gap_ids.length ? [`규칙 GAP: ${decision.gap_ids.join(", ")}`] : [])]}
+      sources={allSources} reasons={[...(holdReasons ?? []), ...(projection?.blocked_reason ? [projection.blocked_action || "판정이 보류되어 원문과 처리 상태를 확인해야 합니다."] : []), ...(decision?.gap_ids.length ? [`규칙 GAP: ${decision.gap_ids.join(", ")}`] : [])]}
       evidenceNote={evidenceNote} nextChecks={projection?.blocked_action ? [projection.blocked_action] : []} onSourceOpen={open} />
     <details><summary>검토 후보 · 항목 연결 확인 필요 ({candidates.length}건)</summary><RawCandidatesList candidates={candidates} onSourceOpen={onSourceOpen} /></details>
     {rawCandidates.length ? <details><summary>추가 검색 후보 {rawCandidates.length}건 · 원문 검증 필요</summary>
