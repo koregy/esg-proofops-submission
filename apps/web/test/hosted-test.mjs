@@ -154,7 +154,7 @@ const result = { schema: "r108-hosted-result-v1", claims: [claimA, claimB, claim
 // unknown / range vs confirmed / hold reasons
 const rHtml = html(createElement(rv.ResultView, { result }));
 assert.match(rHtml, /합성 주장 문장 하나/); assert.match(rHtml, /p\.22/);
-assert.match(rHtml, /원문 확인 필요/);
+assert.match(rHtml, /주장 원문 · 확인 필요/);
 assert.match(rHtml, /R108_NEEDS_REVIEW|일부 주장이 사람 검토/); assert.match(rHtml, /일부 주장이 사람 검토를 기다리고/);
 assert.match(rHtml, /분류 미합의/);
 assert.match(rHtml, /mini-status good">E3 · 입증 요건 충족/);
@@ -257,9 +257,11 @@ assert.doesNotMatch(detailCard, /누락된 입증 요소|기업.*결손|원문�
 // W21: stage/progress values remain explicit; unavailable counts are not invented.
 const progressHtml = html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", stage: "tag", progress: .65, claims_extracted: 12 } })).replace(/<!-- -->/g, "");
 assert.match(progressHtml, /진행 65%/);
-assert.match(progressHtml, /aria-current="step"><b>3. 근거 대조/);
+assert.match(progressHtml, /aria-current="step"><b>3회 독립 판정/);
 assert.match(progressHtml, /근거 대조 집계 중/);
-assert.match(progressHtml, /예상 소요 약 20–45분.*기존 15–30쪽 분석 사례 기준/);
+assert.match(progressHtml, /예상 남은 시간 약 7–16분/);
+assert.match(progressHtml, new RegExp(`분석 중<small> · ${new Set(run.selected_pages).size}쪽`));
+assert.doesNotMatch(progressHtml, /앞선 구간|처리 구간|서버가 보고한 단계/);
 const unknownProgressHtml = html(createElement(v.RunOutcomeView, { run: { ...run, status: "running", stage: "unknown_stage" } }));
 assert.match(unknownProgressHtml, /<progress max="1" aria-label="분석 진행률"/);
 assert.doesNotMatch(unknownProgressHtml, /unknown_stage|NaN|진행 0%/);

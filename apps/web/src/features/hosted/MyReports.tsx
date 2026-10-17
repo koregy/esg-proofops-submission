@@ -1,3 +1,4 @@
+import { documentName } from "./documentName";
 import { useEffect, useRef, useState } from "react";
 import { HostedApiError, type HostedClient, type ListedDocument, type ListedRun } from "./hostedClient";
 
@@ -61,7 +62,7 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
       <p className="hosted-note">현재 로그인한 작업 공간에서 접근할 수 있는 보고서와 실행입니다.</p>
       <div className="hosted-inventory-group"><h4>보고서 <span>{documents.length}</span></h4>
       <ul className="hosted-inventory-list">{documents.map(doc => <li key={doc.document_id}>
-        <div className="hosted-inventory-info"><b>{doc.display_name}</b><p className="hosted-note">{doc.page_count}쪽 · 업로드 <InventoryTime value={doc.uploaded_at} /></p></div>
+        <div className="hosted-inventory-info"><b>{documentName(doc) ?? doc.display_name}</b><p className="hosted-note">{doc.page_count}쪽 · 업로드 <InventoryTime value={doc.uploaded_at} /></p></div>
         <span className="hosted-state">업로드 완료</span>
         <button className="hosted-secondary" type="button" onClick={() => onOpenDocument(doc)}>범위 열기</button>
       </li>)}</ul>
@@ -70,7 +71,7 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
       </div>
       <div className="hosted-inventory-group"><h4>실행 <span>{runs.length}</span></h4>
       <ul className="hosted-inventory-list">{runs.map(run => <li key={run.run_id}>
-        <div className="hosted-inventory-info"><b>{documents.find(doc => doc.document_id === run.document_id)?.display_name ?? `보고서 ${run.document_id.slice(0,8)}`}</b>
+        <div className="hosted-inventory-info"><b>{documents.filter(doc => doc.document_id === run.document_id).map(doc => documentName(doc) ?? doc.display_name)[0] ?? `보고서 ${run.document_id.slice(0,8)}`}</b>
           <p className="hosted-note">분석 {run.run_id.slice(0,8)} · 접수 <InventoryTime value={run.created_at} /></p>
           <p className="hosted-note">{run.stage ? stages[run.stage] ?? "처리 중" : ""}{typeof run.progress === "number" ? ` · 진행 ${Math.round(Math.max(0,Math.min(1,run.progress))*100)}%` : ""}{typeof run.queue_position === "number" ? ` · 대기 순번 ${run.queue_position}` : ""}</p>
           {typeof run.progress === "number" && <progress max={1} value={Math.max(0,Math.min(1,run.progress))} aria-label={`분석 ${run.run_id.slice(0,8)} 진행률`} />}

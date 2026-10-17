@@ -33,7 +33,7 @@ test('export contains every claim, precise quote, grade and citation including r
     assert.ok(html.includes(resultBrowserItem(legacy,claim).badge));
   }
   assert.match(html,/잠정은 현재 확인된 최소 수준/);
-  assert.match(html,/선택하지 않은 쪽은 분석·판정 대상에서 제외/);
+  assert.match(html,/선택하지 않은 쪽은 주장 추출 대상에서 제외/);
   assert.match(html,/원본 판정 기록/);
   assert.match(html,/브라우저 인쇄로 PDF 저장 가능/);
 });
@@ -110,7 +110,7 @@ test('unknown optional headline metadata is omitted in screen and exported repor
   const heading=screen.match(/<header[^]*?<\/header>/)[0];
   assert.doesNotMatch(heading,/미제공|없음|unknown|119쪽/);
   const report=resultReportHtml(result,{companyName:'없음',reportName:'unknown'});
-  assert.doesNotMatch(report.match(/<header[^]*?<\/header>/)[0], /미제공|없음|unknown/);
+  assert.doesNotMatch(report.match(/<header[^]*?<\/dl>/)[0], /미제공|없음|unknown/);
 });
 
 test('124 confirmed / 0 provisional / 87 held fixture retains exact statuses with a confirmed-only chart', () => {

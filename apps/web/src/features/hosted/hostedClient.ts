@@ -47,6 +47,7 @@ export type HostedRun = {
   provider_error_code?: string | null; provider_error_message?: string | null;
   user_active_count?: number; user_processing_count?: number;
   claims_extracted?: number; claims_processed?: number;
+  claim_stage_counts?: Partial<Record<"preliminary" | "relation" | "elements", number>> | null;
   result_url?: string | null; result?: HostedResult | null;
 };
 
@@ -82,6 +83,7 @@ export type TableObservation = {
   value_column_name?: string | null; comparisons?: TableComparison[]; verification_state?: string | null;
 };
 export type ResultDecision = {
+  rule_ids?: string[];
   confirmation_basis?: string;
   decision_revision?: number; tag_revision?: number; decision_status: string; evidence_grade: string | null; label: string | null;
   review_status: string; missing_elements?: string[]; excluded_elements?: string[]; gap_ids?: string[]; grade_range?: (GradeRange & { rule_gap?: boolean }) | null;
@@ -127,6 +129,8 @@ export type HostedResult = {
   schema: string; claims: ResultClaim[]; reviews: ResultReview[]; hold_reasons: string[]; page_map: number[];
   hold_reason_details?: { code: string; message: string }[];
   pipeline?: { status?: string; reason?: string | null; reporting_scope?: Partial<ReportingScope>; stage_seconds?: Record<string, number>;
+    provider_concurrency?: { completed_by_role?: Record<string, number> };
+    ux1_data?: { table_count?: number | null; model_judgment_calls?: number };
     extraction_outcome?: ExtractionOutcome;
     scope?: { pages?: number[]; claim_pages?: number[]; declared_subset?: boolean } };
   possible_grade_range?: GradeRange | null; confirmed_grade?: string | null;
@@ -341,8 +345,8 @@ export function createHostedClient(options: ClientOptions = {}) {
       return blob;
     },
     getDocument: (documentId: string, signal?: AbortSignal) => request<HostedDocument>("GET", `/v1/documents/${encodeURIComponent(documentId)}`, { signal }),
-    uploadDocument: (file: Blob, key = newIdempotencyKey(), signal?: AbortSignal) =>
-      request<HostedDocument>("POST", "/v1/documents", { body: file, headers: { "Content-Type": "application/pdf", "Idempotency-Key": key }, signal }),
+    uploadDocument: (file: Blob, key = newIdempotencyKey(), signal?: AbortSignal, ux1Metadata?: { original_filename?: string; title?: string; policy_sha256: string }) =>
+      request<HostedDocument>("POST", "/v1/documents", { body: file, headers: { "Content-Type": "application/pdf", "Idempotency-Key": key, ...(ux1Metadata ? { "X-UX1-Metadata": encodeURIComponent(JSON.stringify(ux1Metadata)) } : {}) }, signal }),
     scopePlan: (documentId: string) => request<ScopePlan>("POST", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan`),
     getScopePlan: (documentId: string, signal?: AbortSignal) => request<ScopePlan>("GET", `/v1/documents/${encodeURIComponent(documentId)}/scope-plan`, { signal }),
     editScope: (documentId: string, scope: ScopePlan, claims: number[], evidence: number[], period?: ReportingScopeInput) =>
@@ -351,7 +355,7 @@ export function createHostedClient(options: ClientOptions = {}) {
       request<HostedRun>("POST", "/v1/runs", { json: { document_id: documentId, scope_selection_sha256: scope.selection?.selection_sha256 }, headers: { "Idempotency-Key": key, ...(profile ? { "X-Pipeline-Profile": profile } : {}) } }),
     getRun: (statusUrl: string, signal?: AbortSignal) => request<HostedRun>("GET", statusUrl, { signal }),
     cancelRun: (runId: string) => request<HostedRun>("POST", `/v1/runs/${encodeURIComponent(runId)}/cancel`),
-    getResult: (resultUrl: string, signal?: AbortSignal) => request<HostedResult>("GET", `${resultUrl}${resultUrl.includes("?") ? "&" : "?"}w18=true`, { signal }),
+    getResult: (resultUrl: string, signal?: AbortSignal, ux1Policy?: string) => request<HostedResult>("GET", `${resultUrl}${resultUrl.includes("?") ? "&" : "?"}w18=true${ux1Policy ? `&ux1=${encodeURIComponent(ux1Policy)}` : ""}`, { signal }),
     /** Reviewer/admin. If-Match is the quoted integer review revision (reviews[].revision); the server recomputes the grade. */
     resolveReview: (runId: string, reviewId: string, revision: number, body: ResolveBody, key = newIdempotencyKey()) =>
       request<ResolveResponse>("POST", `/v1/runs/${encodeURIComponent(runId)}/reviews/${encodeURIComponent(reviewId)}/resolve`, { json: body, headers: { "If-Match": `"${revision}"`, "Idempotency-Key": key } }),
@@ -446,12 +450,17 @@ const blockedReasons: Record<string, string> = {
   MODEL_SPAN_OR_SCHEMA_INVALID: "추출 응답의 원문 구간 또는 형식 검증에 실패했습니다.",
   TRANSPORT_FAILED: "추출 요청의 통신이 실패했습니다.",
 };
+export function isProcessingFailure(code: string): boolean {
+  return /(?:^|_)UNEXPECTED(?:_|$)|(?:^|_)FAILED(?:$|:)|^INPUT_INVALID$/.test(code.trim());
+}
+
 /** Korean wording for backend hold reasons; unknown machine codes stay out of user copy. */
 export function holdReasonText(code: string, details?: { code: string; message: string }[]): string {
   const detail = details?.find(item => item.code === code)?.message;
   if (detail) return detail;
   const reason = code.trim();
   if (blockedReasons[reason]) return blockedReasons[reason];
+  if (isProcessingFailure(code)) return "처리 오류로 보류했습니다. 이 오류는 기업의 근거 결손을 뜻하지 않습니다.";
   if (/^REVIEW:/.test(reason)) return `${reason.slice(7)} 요소 사람 확인 필요`;
   const baseCode = reason.split(":", 1)[0];
   if (baseCode !== reason && blockedReasons[baseCode]) return blockedReasons[baseCode];

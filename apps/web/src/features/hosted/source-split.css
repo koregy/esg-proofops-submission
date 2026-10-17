@@ -79,3 +79,14 @@
 .w18-text-layer[data-main-rotation="90"] { transform:rotate(90deg) translateY(-100%); }
 .w18-text-layer[data-main-rotation="180"] { transform:rotate(180deg) translate(-100%,-100%); }
 .w18-text-layer[data-main-rotation="270"] { transform:rotate(270deg) translateX(-100%); }
+
+/* Keep evidence navigation bounded so the PDF remains directly reachable. */
+.split-evidence-picker { margin-top:12px; border:1px solid #d5dfda; border-radius:8px; padding:10px; }
+.split-evidence-picker summary { cursor:pointer; font-size:14px; font-weight:600; }
+.split-evidence-picker .split-jump-chips { max-height:150px; overflow:auto; padding:3px; }
+@media(max-width:760px) {
+  .source-split .split-jump-chips button { font-size:14px; min-height:44px; flex:none; }
+  .split-evidence-picker .split-jump-chips { flex-wrap:nowrap; max-width:100%; }
+  .split-legend { gap:6px 12px; margin:10px 0; }
+  .split-note { overflow-wrap:anywhere; }
+}
