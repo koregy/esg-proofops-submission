@@ -129,3 +129,61 @@ test('progress uses concise completion labels and one estimate line', () => {
   for(const label of ['완료','진행 중','대기','예상 남은 시간']) assert.ok(html.includes(label));
   assert.doesNotMatch(html,/앞선 구간|처리 구간|서버가 보고한 단계/);
 });
+
+test('analysis examples admit only completed runs and preserve source records', () => {
+  const { exampleRuns } = require('./HostedExamples.tsx');
+  const rows = [
+    {run_id:'old',status:'completed',created_at:'2026-10-01T00:00:00Z'},
+    {run_id:'running',status:'running',created_at:'2026-10-17T00:00:00Z'},
+    {run_id:'partial',status:'partial_blocked',created_at:'2026-10-16T00:00:00Z'},
+    {run_id:'failed',status:'failed',created_at:'2026-10-16T00:00:00Z'},
+  ];
+  const before=JSON.stringify(rows);
+  assert.deepEqual(exampleRuns(rows).map(row=>row.run_id),['old']);
+  assert.equal(rows[2].status,'partial_blocked');
+  assert.equal(JSON.stringify(rows),before);
+});
+
+test('budget notice reads runtime amounts and does not reuse an obsolete event cap', () => {
+  const { budgetNotice } = require('./hostedClient.ts');
+  assert.equal(budgetNotice({run_usd:'1.0',day_usd:'7',event_usd:'30'}),'분석 비용 한도: 실행당 USD 1.0 · 하루 USD 7 · 행사 전체 USD 30');
+  assert.equal(budgetNotice({}), '분석 비용 한도는 현재 서비스 설정을 따릅니다.');
+  assert.doesNotMatch(budgetNotice({run_usd:'internal_code',day_usd:-1}), /internal_code|-1/);
+});
+
+
+test('curated examples deduplicate file SHA across pages and select current policy, never old partials', async () => {
+  const { loadExamples, CURRENT_EXAMPLE_POLICY } = require('./exampleCatalog.ts');
+  const doc=(id,sha,filename)=>({document_id:id,sha256:sha,original_filename:filename,page_count:119});
+  const documents=[doc('a','same','Acme_Sustainability_Report_2025_KOR.pdf'),doc('b','same'),doc('c','second','Beta 2025 지속가능경영보고서.pdf'),doc('d','test')];
+  const run=(id,document_id,status,created_at)=>({run_id:id,document_id,status,created_at,result_url:`/v1/runs/${id}/result`});
+  const runs=[run('new-old-policy','b','completed','2026-10-17'),run('partial','a','partial_blocked','2026-10-18'),run('current','a','completed','2026-10-16'),run('superseded','a','completed','2026-10-15'),run('unversioned','c','completed','2026-10-14'),run('test','d','completed','2026-10-19')];
+  const calls=[];
+  const result=policy=>({...fixture,pipeline:{...fixture.pipeline,scope:{analysis_profile_sha256:policy}}});
+  const client={
+    listDocuments:async cursor=>({items:cursor?documents.slice(2):documents.slice(0,2),next_cursor:cursor?null:'next'}),
+    listRuns:async cursor=>({items:cursor?runs.slice(2):runs.slice(0,2),next_cursor:cursor?null:'next'}),
+    getResult:async url=>{calls.push(url);return url.includes('new-old-policy')?result('old'):url.includes('unversioned')?result(undefined):result(CURRENT_EXAMPLE_POLICY);},
+  };
+  const examples=await loadExamples(client,new AbortController().signal);
+  assert.deepEqual(examples.map(e=>e.run.run_id),['current','unversioned']);
+  assert.equal(examples[0].name,'Acme 2025 지속가능경영보고서');
+  assert.equal(examples[0].counts.total,211);
+  assert.ok(!calls.some(url=>/partial|superseded|test/.test(url)));
+});
+
+test('a reused result matches its source policy; known old policy is never a no-pin fallback', async () => {
+  const { chooseExample, CURRENT_EXAMPLE_POLICY } = require('./exampleCatalog.ts');
+  const rows=['new','old'].map((run_id,i)=>({run_id,status:'completed',created_at:`2026-10-${17-i}`,result_url:`/${run_id}`}));
+  const current={...fixture,reuse:{source_policy_sha256:CURRENT_EXAMPLE_POLICY},pipeline:{scope:{analysis_profile_sha256:'wrapper'}}};
+  assert.equal((await chooseExample(rows,async()=>current)).run.run_id,'new');
+  assert.equal(await chooseExample(rows,async url=>({...fixture,pipeline:{scope:{analysis_profile_sha256:url==='/new'?undefined:'old'}}})),null);
+});
+
+test('history names resolve filename metadata across identical uploads without using claim text', () => {
+  const { reportNames }=require('./documentName.ts');
+  const docs=[{document_id:'named',sha256:'same',ux1_metadata:{original_filename:'Kakao_SustainabilityReport2025_KR.pdf'}},{document_id:'legacy',sha256:'same',display_name:'분석 보고서'},{document_id:'unknown',sha256:'other',display_name:'분석 보고서'}];
+  const names=reportNames(docs);
+  assert.equal(names.legacy,'Kakao_SustainabilityReport2025_KR');
+  assert.equal(names.unknown,undefined);
+});

@@ -182,7 +182,7 @@ export function gradeSummary(claim: ResultClaim): { confirmed: boolean; headline
     const open = range?.open_elements.map(id => `${id} ${elementLabels[id] ?? ""}`.trim()).join("·");
     const reasons = provisional.display_type === "hold" ? [] : claimHoldReasons(claim);
     const basis = provisional.grade_basis === "reachable_floor" ? "가능 범위 하한: 현재 확인된 최소 수준" : "";
-    return { confirmed: false, headline: provisional.display_type === "hold" ? "판정 보류" : provisional.evidence_grade ? `잠정 등급 ${provisional.evidence_grade} · 추가 확인 필요` : range ? `잠정·범위 ${range.floor}–${range.ceiling}` : "잠정 등급 산출 보류",
+    return { confirmed: false, headline: provisional.display_type === "hold" ? "판정 보류" : provisional.evidence_grade ? `추가 확인 필요 · ${provisional.evidence_grade}` : range ? `판정 보류 · 가능 범위 ${range.floor}–${range.ceiling}` : "판정 보류",
       note: [claim.lower_bound_display, basis, reasons.length ? `보류 사유: ${reasons.join(" · ")}` : provisional.reason ? holdReasonText(provisional.reason) : "",
         range ? `가능 범위 ${range.floor}–${range.ceiling} (미해결 요소: ${open || "없음"})` : ""].filter(Boolean).join(" · ") };
   }
@@ -220,7 +220,7 @@ export function resultBrowserItem(result: Pick<HostedResult, "page_map">, claim:
     claim, confirmed, bucket, grade, track: claim.track ?? (cf6 ? claim.cf6_track : null) ?? claim.provisional_track ?? "unknown",
     page: result.page_map?.[claim.page_num - 1] != null ? pageLabel(result, claim.page_num)
       : Number.isInteger(claim.original_page_num) && claim.original_page_num > 0 ? `p.${claim.original_page_num}` : pageLabel(result, claim.page_num),
-    badge: confirmed ? `${scoped ? "확정 · " : claim.confirmation_source === "auto_unanimous_v1" || claim.confirmation_source === "auto_direct_certification_c3_v1" ? "자동 확정 · " : ""}${decisionLine(decision)}` : grade ? `잠정 ${grade}` : "판정 보류",
+    badge: confirmed ? `${scoped ? "확정 · " : claim.confirmation_source === "auto_unanimous_v1" || claim.confirmation_source === "auto_direct_certification_c3_v1" ? "자동 확정 · " : ""}${decisionLine(decision)}` : grade ? `추가 확인 필요 · ${grade}` : "판정 보류",
     elements: cf6 && claim.cf6_elements?.length ? claim.cf6_elements : scoped && claim.sc1_elements?.length ? claim.sc1_elements.map(element => ({
       element_id: element.element_id, state: element.state,
       evidence_refs: element.state === "present"

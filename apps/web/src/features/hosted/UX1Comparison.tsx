@@ -6,10 +6,10 @@ import { reportInsights, UX1_HASH } from "./ux1Model";
 
 type ComparisonReport = { result: HostedResult; name: string; pageCount: number; pages: number[]; runId: string };
 export function ComparisonResults({ reports }: { reports: ComparisonReport[] }) {
-  return <div className="ux1-comparison-results"><p className="hosted-note">선택 범위·주장 수·보고기간이 다르면 직접적인 기업 순위로 해석할 수 없습니다. 비율은 각 보고서의 전체 추출 주장 수를 분모로 사용합니다. 보류·잠정은 확정 등급에 합산하지 않습니다.</p>
+  return <div className="ux1-comparison-results"><p className="hosted-note">선택 범위·주장 수·보고기간이 다르면 직접적인 기업 순위로 해석할 수 없습니다. 비율은 각 보고서의 전체 추출 주장 수를 분모로 사용합니다. 확정 등급만 분포에 집계하며 보류는 등급을 부여하지 않습니다.</p>
     <div className="ux1-compare-grid">{reports.map(report=>{
       const counts = resultBrowserSummary(report.result), scope = resultScope(report.result,report.pageCount,report.pages), insight = reportInsights(report.result);
-      return <article className="ux1-card" key={report.runId}><h4>{report.name}</h4><p>분석 범위 {scope.pages.length} / 전체 {scope.total ?? "미제공"}쪽 · {report.result.pipeline?.reporting_scope?.report_year ?? "보고연도 미제공"}</p><p>추출 {counts.total} · 확정 {counts.confirmed} · 잠정 {counts.provisional} · 보류 {counts.hold}건</p>
+      return <article className="ux1-card" key={report.runId}><h4>{report.name}</h4>{counts.provisional > 0 && <p className="hosted-state">이전 버전 결과 · 추가 확인 필요 주장은 확정·보류와 별도로 집계합니다.</p>}<p>분석 범위 {scope.pages.length} / 전체 {scope.total ?? "미제공"}쪽 · {report.result.pipeline?.reporting_scope?.report_year ?? "보고연도 미제공"}</p><p>추출 {counts.total} · 확정 {counts.confirmed}{counts.provisional > 0 && <> · 추가 확인 필요 {counts.provisional}</>} · 보류 {counts.hold}건</p>
         <h5>확정 등급 분포</h5>{["E3","E2","E1","E0"].map(g=><div className="ux1-compare-grade" key={g}><b>{g}</b><meter min={0} max={Math.max(1,counts.total)} value={counts.confirmedGrades[g]} aria-label={`${report.name} ${g}`} /><span>{counts.confirmedGrades[g]}건 · {counts.total ? Math.round(100*counts.confirmedGrades[g]/counts.total) : 0}%</span></div>)}
         <h5>트랙별 확정 등급 / 보류</h5><table><thead><tr><th>트랙</th><th>E3 / E2 / E1 / E0</th><th>보류</th></tr></thead><tbody>{insight.tracks.map(t=><tr key={t.track}><th>{t.name}<small> {t.total}건</small></th><td>{["E3","E2","E1","E0"].map(g=>t.grades[g]).join(" / ")}</td><td>{t.hold}</td></tr>)}</tbody></table>
       </article>;

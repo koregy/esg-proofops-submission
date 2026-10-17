@@ -1,6 +1,7 @@
-import { documentName } from "./documentName";
+import { reportNames } from "./documentName";
+import { runDocuments } from "./exampleCatalog";
 import { useEffect, useRef, useState } from "react";
-import { HostedApiError, type HostedClient, type ListedDocument, type ListedRun } from "./hostedClient";
+import { HostedApiError, type HostedClient, type HostedDocument, type ListedDocument, type ListedRun } from "./hostedClient";
 
 const statuses: Record<string, string> = { queued: "대기 중", running: "분석 중", accounting_pending: "비용 정산 확인 중", partial_blocked: "판정 보류", completed: "완료", failed: "실패", cancelled: "취소됨" };
 const stages: Record<string, string> = { queued: "대기", parse: "문서 파싱", extract: "주장 추출", tag: "요소 태깅", result: "결과 정리" };
@@ -18,6 +19,8 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
   onUnavailable: (signal: AbortSignal) => void; onFailure: (err: unknown) => void;
 }) {
   const [documents, setDocuments] = useState<ListedDocument[]>([]);
+  const [extraDocuments, setExtraDocuments] = useState<HostedDocument[]>([]);
+  const names = reportNames([...documents, ...extraDocuments]);
   const [runs, setRuns] = useState<ListedRun[]>([]);
   const [docCursor, setDocCursor] = useState<string | null>(null);
   const [runCursor, setRunCursor] = useState<string | null>(null);
@@ -28,11 +31,13 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
   const abort = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController(); abort.current = controller;
-    setBusy(true); setUnavailable({ documents: false, runs: false }); setError(""); setDocuments([]); setRuns([]); setDocCursor(null); setRunCursor(null);
+    setBusy(true); setUnavailable({ documents: false, runs: false }); setError(""); setDocuments([]); setExtraDocuments([]); setRuns([]); setDocCursor(null); setRunCursor(null);
     void (async () => {
       try {
         const [docs, executions] = await Promise.all([client.listDocuments(null, controller.signal).catch(missingCollection), client.listRuns(null, controller.signal).catch(missingCollection)]);
+        const extra = executions ? await runDocuments(client, executions.items, docs?.items ?? [], controller.signal) : [];
         if (controller.signal.aborted) return;
+        setExtraDocuments(extra);
         setUnavailable({ documents: !docs, runs: !executions });
         if (docs) { setDocuments(docs.items); setDocCursor(docs.next_cursor); }
         if (executions) { setRuns(executions.items); setRunCursor(executions.next_cursor); }
@@ -49,7 +54,7 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
     try {
       const signal = abort.current?.signal;
       if (kind === "documents") { const next = await client.listDocuments(docCursor, signal); if (!signal?.aborted) { setDocuments(old => [...old,...next.items.filter(item => !old.some(previous => previous.document_id === item.document_id))]); setDocCursor(next.next_cursor); } }
-      else { const next = await client.listRuns(runCursor, signal); if (!signal?.aborted) { setRuns(old => [...old,...next.items.filter(item => !old.some(previous => previous.run_id === item.run_id))]); setRunCursor(next.next_cursor); } }
+      else { const next = await client.listRuns(runCursor, signal); const extra = await runDocuments(client, next.items, [...documents, ...extraDocuments], signal); if (!signal?.aborted) { setExtraDocuments(old => [...old, ...extra]); setRuns(old => [...old,...next.items.filter(item => !old.some(previous => previous.run_id === item.run_id))]); setRunCursor(next.next_cursor); } }
     } catch (err) { if (!abort.current?.signal.aborted) { setError(err instanceof HostedApiError ? err.userMessage : "목록을 불러오지 못했습니다."); onFailure(err); } }
     finally { if (!abort.current?.signal.aborted) setBusy(false); }
   }
@@ -62,7 +67,7 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
       <p className="hosted-note">현재 로그인한 작업 공간에서 접근할 수 있는 보고서와 실행입니다.</p>
       <div className="hosted-inventory-group"><h4>보고서 <span>{documents.length}</span></h4>
       <ul className="hosted-inventory-list">{documents.map(doc => <li key={doc.document_id}>
-        <div className="hosted-inventory-info"><b>{documentName(doc) ?? doc.display_name}</b><p className="hosted-note">{doc.page_count}쪽 · 업로드 <InventoryTime value={doc.uploaded_at} /></p></div>
+        <div className="hosted-inventory-info"><b>{names[doc.document_id] ?? doc.display_name}</b><p className="hosted-note">{doc.page_count}쪽 · 업로드 <InventoryTime value={doc.uploaded_at} /></p></div>
         <span className="hosted-state">업로드 완료</span>
         <button className="hosted-secondary" type="button" onClick={() => onOpenDocument(doc)}>범위 열기</button>
       </li>)}</ul>
@@ -71,7 +76,7 @@ export function MyReports({ client, onOpenRun, onOpenDocument, onUnavailable, on
       </div>
       <div className="hosted-inventory-group"><h4>실행 <span>{runs.length}</span></h4>
       <ul className="hosted-inventory-list">{runs.map(run => <li key={run.run_id}>
-        <div className="hosted-inventory-info"><b>{documents.filter(doc => doc.document_id === run.document_id).map(doc => documentName(doc) ?? doc.display_name)[0] ?? `보고서 ${run.document_id.slice(0,8)}`}</b>
+        <div className="hosted-inventory-info"><b>{names[run.document_id] ?? `이름 미등록 보고서 · ${run.document_id.slice(0,8)}`}</b>
           <p className="hosted-note">분석 {run.run_id.slice(0,8)} · 접수 <InventoryTime value={run.created_at} /></p>
           <p className="hosted-note">{run.stage ? stages[run.stage] ?? "처리 중" : ""}{typeof run.progress === "number" ? ` · 진행 ${Math.round(Math.max(0,Math.min(1,run.progress))*100)}%` : ""}{typeof run.queue_position === "number" ? ` · 대기 순번 ${run.queue_position}` : ""}</p>
           {typeof run.progress === "number" && <progress max={1} value={Math.max(0,Math.min(1,run.progress))} aria-label={`분석 ${run.run_id.slice(0,8)} 진행률`} />}

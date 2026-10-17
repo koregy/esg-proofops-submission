@@ -20,7 +20,7 @@ test('chart separates confirmed and provisional grades without changing API clai
   assert.equal(Object.values(counts.grades).reduce((a,b)=>a+b,0), counts.provisional);
   assert.equal(counts.confirmed + counts.provisional + counts.hold, counts.total);
   const html = renderToStaticMarkup(React.createElement(ResultReportSummary, { result, companyName:'검증 기업',pageCount:150 }));
-  for(const grade of ['E3','E2','E1','E0']) assert.ok(html.includes(`${grade} 확정 ${counts.confirmedGrades[grade]}건, 잠정 ${counts.grades[grade]}건`));
+  for(const grade of ['E3','E2','E1','E0']) assert.ok(html.includes(`${grade} 확정 ${counts.confirmedGrades[grade]}건, 추가 확인 필요 ${counts.grades[grade]}건`));
   assert.ok(html.includes('검증 기업'));
   assert.equal(JSON.stringify(result), before);
 });
@@ -32,7 +32,7 @@ test('export contains every claim, precise quote, grade and citation including r
     assert.ok(html.includes(claim.claim_id));
     assert.ok(html.includes(resultBrowserItem(legacy,claim).badge));
   }
-  assert.match(html,/잠정은 현재 확인된 최소 수준/);
+  assert.match(html,/추가 확인 필요 등급은 이전 버전에서 확인된 최소 수준/);
   assert.match(html,/선택하지 않은 쪽은 주장 추출 대상에서 제외/);
   assert.match(html,/원본 판정 기록/);
   assert.match(html,/브라우저 인쇄로 PDF 저장 가능/);
@@ -121,8 +121,9 @@ test('124 confirmed / 0 provisional / 87 held fixture retains exact statuses wit
   const html=renderToStaticMarkup(React.createElement(ResultView,{result,reportName:'합성 검증 보고서.pdf',companyName:'검증 기업',pageCount:119}));
   assert.match(html,/>합성 검증 보고서<\/h2>/);
   assert.doesNotMatch(html,/class="provisional-key"|class="provisional" style|role="tab"[^>]*>잠정/);
-  assert.match(html,/확정·보류로 구분/);
-  for(const grade of ['E3','E2','E1','E0']) assert.ok(html.includes(`${grade} 확정 31건, 잠정 0건`));
+  assert.match(html,/확정 124 \+ 보류 87 = 추출 주장 211건/);
+  assert.doesNotMatch(html,/잠정/);
+  for(const grade of ['E3','E2','E1','E0']) assert.ok(html.includes(`aria-label="${grade} 확정 31건"`));
   for(const c of result.claims.slice(124)) assert.equal(resultBrowserItem(result,c).grade,null);
   assert.equal(JSON.stringify(result),original);
 });

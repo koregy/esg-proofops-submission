@@ -4,8 +4,8 @@ import { UX1Progress } from "./UX1Progress";
 import { UX1Comparison } from "./UX1Comparison";
 import { documentName } from "./documentName";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link } from "react-router";
-import { createHostedClient, holdReasonText, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
+import { Link, useNavigate } from "react-router";
+import { budgetNotice, createHostedClient, holdReasonText, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
 import { resultBrowserSummary } from "./resultModel";
 import { MyReports } from "./MyReports";
 import { ResultView } from "./HostedResult";
@@ -57,6 +57,7 @@ type Phase = "checking" | "login" | "ready";
 type Intake = { key: string; name: string; doc?: HostedDocument; error?: string; runId?: string; restoreRunId?: string; restored?: boolean };
 
 export function HostedAnalysis({ client: injected }: { client?: HostedClient }) {
+  const navigate = useNavigate();
   const client = useMemo(() => injected ?? createHostedClient({ base: import.meta.env.VITE_HOSTED_API_BASE || "/hosted-api" }), [injected]);
   const [connection, setConnection] = useState("");
   const [retryVersion, setRetryVersion] = useState(0);
@@ -155,7 +156,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
   }
   async function login(event: FormEvent) {
     event.preventDefault(); setError(""); setBusy("로그인 중");
-    try { setSession(await (loginMethod === "password" ? client.loginPassword(code, accessRole) : client.login(code))); setPhase("ready"); } catch (err) { fail(err); } finally { setCode(""); setBusy(""); }
+    try { setSession(await (loginMethod === "password" ? client.loginPassword(code, accessRole) : client.login(code))); setPhase("ready"); if (new URLSearchParams(window.location.search).get("return_to") === "examples") navigate("/demo"); } catch (err) { fail(err); } finally { setCode(""); setBusy(""); }
   }
   async function upload() {
     const controller = new AbortController(); uploadAbort.current = controller;
@@ -240,10 +241,10 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
       </li>)}
     </ul>
   </>;
-  return <section className="surface live-report hosted-analysis" aria-label="호스팅 분석">
+  return <section className="surface live-report hosted-analysis" aria-label="보고서 분석">
     <header className="hosted-heading">
     <p className="eyebrow">보고서 근거 점검</p><h2>ESG 보고서 근거 분석</h2>
-    <p>PDF를 올리고 분석 범위를 선택하면 주장과 원문 근거를 연결합니다. 결과는 확정·잠정·보류로 안내합니다.</p>
+    <p>PDF를 올리고 분석 범위를 선택하면 주장과 원문 근거를 연결합니다. 결과는 확정·보류로 안내합니다.</p>
     {session && <p className="hosted-session">로그인됨 · {session.role === "admin" ? "관리자" : session.role === "reviewer" ? "검토자" : session.role === "organizer" ? "대회측" : "사용자"} <button className="hosted-text-button" type="button" onClick={() => void logout()}>로그아웃</button></p>}
     </header>
     {Object.values(runtime?.provider_limits ?? {}).some(limit => limit.status === "blocked") && <p className="hosted-error" role="alert">{providerLimitMessage}</p>}
@@ -409,7 +410,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
     <IntakeSurface className={result ? "hosted-panel hosted-run-summary" : "hosted-intake"}>
     {result && <summary><span className="hosted-summary-name">실행 요약 · {name}</span><span>범위 {run?.selected_pages.length ?? 0}쪽 · {statusLabel[run?.status ?? ""] ?? "상태 미확인"}{stageSeconds !== null ? ` · 처리 시간 ${Math.round(stageSeconds)}초 (단계 합계·대기 제외)` : ""}</span></summary>}
     <div className="hosted-section-heading">{!result && <h3>{name}</h3>}
-    <p className="hosted-state" data-status={run?.status} role="status" data-testid="document-status">{run ? `${statusLabel[run.status] ?? run.status}${run.status === "queued" && run.queue_position ? ` · 대기 ${run.queue_position}번째` : run.status === "running" && run.stage ? ` · ${stageLabel[run.stage] ?? run.stage}` : ""}` : scope ? "분석 접수 가능" : "범위 계획 준비 중"}</p></div>
+    <p className="hosted-state" data-status={run?.status} role="status" data-testid="document-status">{run ? `${statusLabel[run.status] ?? "상태 확인 중"}${run.status === "queued" && run.queue_position ? ` · 대기 ${run.queue_position}번째` : run.status === "running" && run.stage ? ` · ${stageLabel[run.stage] ?? "후속 처리"}` : ""}` : scope ? "분석 접수 가능" : "범위 계획 준비 중"}</p></div>
     {result && run && validResourceId(run.run_id) && <button className="hosted-secondary" type="button" onClick={() => void copyResultLink()}>{linkCopied ? "결과 링크 복사됨" : "결과 링크 복사"}</button>}
     <p className="hosted-note">{scope ? `선택 요약: 주장 ${scope.plan.selected_claim_pages.length}쪽 · 근거 검색 ${scope.plan.selected_evidence_pages.length}쪽` : run ? `접수한 선택 범위 ${run.selected_pages.length}쪽` : "분석 범위를 준비하고 있습니다."}</p>
     {!result && runtime?.accept_new_runs === false && <p className="hosted-error">현재 새 분석 접수가 중지되어 있습니다.</p>}
@@ -417,7 +418,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
       <p>업로드 완료 · 총 {doc.page_count}쪽. 자동 선택: 주장 최대 10쪽 · 근거 검색 최대 30쪽(주장 포함). 수정하지 않으면 이 범위로 진행합니다.</p>
       {!scope && <button type="button" disabled={!!busy} onClick={() => { setBusy("자동 범위 계획 생성 중"); void client.scopePlan(doc.document_id).then(applyScope).catch(fail).finally(() => setBusy("")); }}>자동 범위 계획 생성</button>}
       {scope && <>
-        <p>계획 상태: {scopeStatus[scope.plan.status] ?? "범위 확인 필요"} · 선택 범위만 분석하며 원문 확인 필요 항목은 잠정 결과로 표시합니다.</p>
+        <p>계획 상태: {scopeStatus[scope.plan.status] ?? "범위 확인 필요"} · 선택 범위만 분석하며 판정에 필요한 원문 확인이 남은 항목은 보류로 표시합니다.</p>
         <fieldset className="hosted-period" disabled={!!busy || running}>
           <legend>문서 보고기간</legend>
           <p>{scope.reporting_scope?.origin === "detected" ? "원문에서 감지" : scope.reporting_scope?.origin === "manual" ? "사람이 수정한 기간" : "기본 보고기간"} · {scope.reporting_scope?.report_year ?? "입력 필요"}년 ({scope.reporting_scope?.period_start ?? "미확인"} ~ {scope.reporting_scope?.period_end ?? "미확인"})</p>
@@ -439,7 +440,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
         <label>근거 검색 쪽 번호<input value={evidencePages} onChange={event => setEvidencePages(event.target.value)} disabled={!!busy || running} aria-label="근거 검색 쪽 번호" /></label>
         <button className="hosted-secondary" type="button" disabled={!!busy || running || scopeConflict} onClick={() => void saveScope()}>범위 수정 저장</button>
         </div>
-        <details><summary>쪽별 분류와 선택 이유</summary><table className="hosted-scope-table"><thead><tr><th>원본 쪽</th><th>분류</th><th>선택</th><th>이유</th></tr></thead><tbody>{scope.plan.pages.map(page => <tr key={page.page}><td>{page.page}</td><td>{scopeCategory[page.category] ?? page.category}</td><td>{scope.plan.selected_claim_pages.includes(page.page) ? "주장·근거" : scope.plan.selected_evidence_pages.includes(page.page) ? "근거 전용" : "제외"}</td><td>{page.reasons.map(reason => scopeReasonText(reason)).join(" · ")}</td></tr>)}</tbody></table></details>
+        <details><summary>쪽별 분류와 선택 이유</summary><table className="hosted-scope-table"><thead><tr><th>원본 쪽</th><th>분류</th><th>선택</th><th>이유</th></tr></thead><tbody>{scope.plan.pages.map(page => <tr key={page.page}><td>{page.page}</td><td>{scopeCategory[page.category] ?? "분류 확인 필요"}</td><td>{scope.plan.selected_claim_pages.includes(page.page) ? "주장·근거" : scope.plan.selected_evidence_pages.includes(page.page) ? "근거 전용" : "제외"}</td><td>{page.reasons.map(reason => scopeReasonText(reason)).join(" · ")}</td></tr>)}</tbody></table></details>
       </>}
       <label>분석 방식<select aria-label="분석 방식" value={profile} onChange={event => setProfile(event.target.value)} disabled={!!busy || running}>
         {!profile.startsWith("finals-unattended-") && <option value={profile}>기본 분석</option>}
@@ -450,7 +451,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
 
     </div></details>
     {!result && run?.status !== "completed" && run?.status !== "partial_blocked" && <div className="hosted-start-row">
-    <p className="hosted-note">분석 비용 한도: 실행당 USD 1.0 · 일·행사 USD 7</p>
+    <p className="hosted-note">{budgetNotice(runtime?.limits)}</p>
     <button className="hosted-primary" type="button" disabled={!!busy || running || !scope || scopeConflict || providerBlocked || runtime?.accept_new_runs === false} onClick={() => void start()}>분석 시작</button>
     </div>}
     {run && <RunOutcomeView run={result ? { ...run, result } : run} />}
