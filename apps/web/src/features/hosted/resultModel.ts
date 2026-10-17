@@ -1,6 +1,6 @@
 // Pure presentation/contract helpers for the r108-hosted-result-v1 DTO (no React, node-testable).
 import { elementLabels } from "../labels";
-import { holdReasonText } from "./hostedClient";
+import { holdReasonText, isProcessingFailure } from "./hostedClient";
 import type { ElementState, HostedResult, MissingEvidence, ResolveBody, ResultClaim, ResultDecision, ResultElement, ResultReview, SourceRefDto, TableObservation } from "./hostedClient";
 
 export const trackText: Record<string, string> = { management: "관리체계", goal: "목표", performance: "성과" };
@@ -21,6 +21,18 @@ export function sourceQualityText(quality: string): string {
   return quality === "verified" ? "원문 검증됨" : "원문 확인 필요";
 }
 
+/** Claim sentence verification is distinct from element-evidence verification. */
+export function claimSourceText(claim: ResultClaim): string {
+  return (claim.source_status?.status ?? claim.source_quality) === "verified" ? "주장 원문 · 검증됨" : "주장 원문 · 확인 필요";
+}
+
+export function claimProcessingFailed(claim: ResultClaim): boolean {
+  return claim.pipeline_status === "failed" || [claim.hold_reason, claim.hold_reason_detail,
+    claim.provisional_grade?.reason, claim.provisional_grade?.hold_reason_detail,
+    ...(claim.provisional_grade?.hold_reasons ?? []), ...(claim.cf6_hold_reasons ?? [])]
+    .some(code => typeof code === "string" && isProcessingFailure(code));
+}
+
 export function reviewStatusText(status: string | undefined): string {
   switch (status) {
     case "human_confirmed": return "사람 확인";
@@ -38,12 +50,16 @@ export function decisionLine(decision: ResultDecision | null): string | null {
 }
 
 export function claimHoldReasons(claim: ResultClaim): string[] {
+  if (claimProcessingFailed(claim)) return [holdReasonText("PROCESSING_FAILED")];
   const provisional = claim.provisional_grade;
   const detail = [
     ...(provisional?.hold_reasons ?? []), provisional?.hold_reason_detail, claim.hold_reason_detail,
     claim.hold_reason, provisional?.reason,
   ].filter((reason): reason is string => typeof reason === "string" && reason.trim().length > 0);
-  return [...new Set(detail.map(reason => holdReasonText(reason)))];
+  return [...new Set(detail.map(reason => {
+    if (/원문 위치 확인/.test(reason) && (claim.source_status?.status ?? claim.source_quality) === "verified") return "요소 근거·연결의 원문 위치 추가 확인 필요";
+    return holdReasonText(reason);
+  }))];
 }
 
 export function holdEvidenceNoteText(note?: string): string | undefined {
@@ -327,16 +343,18 @@ export function buildResolveBody(claim: ResultClaim, review: ResultReview, choic
 /** One primary display reason per held claim; counts sum to the existing hold bucket. */
 export function w18HoldReason(result: HostedResult, claim: ResultClaim): string | null {
   if (resultBrowserItem(result, claim).bucket !== "hold") return null;
+  if (claimProcessingFailed(claim)) return "처리 오류로 보류";
   const provisional = claim.provisional_grade;
   const reasons = [claim.hold_reason, claim.hold_reason_detail, provisional?.hold_reason_detail,
     provisional?.reason, ...(provisional?.hold_reasons ?? []), claim.decision?.decision_status].filter((value): value is string => !!value);
   const text = reasons.join(" ");
-  if ((claim.source_status?.status ?? claim.source_quality) !== "verified" || /SOURCE_VALIDATION|SOURCE_ATTESTATION|원문 위치 확인/.test(text)) return "원문 미확인";
+  if ((claim.source_status?.status ?? claim.source_quality) !== "verified") return "주장 원문 미확인";
   if (/BODY_TABLE_CONFLICT|TEXT_TABLE_CONFLICT|본문·표.*충돌/.test(text)) return "본문·표 수치 충돌";
   if (/CONSENSUS_UNRESOLVED|REPLICA_DISAGREEMENT|TAGGING_DISAGREEMENT|태깅 불일치/.test(text)) return "3회 판단 불일치";
   if (/REPLICA_HEADER_UNRESOLVED|REPLICA_UNRESOLVED|replica 미해결/.test(text)) return "반복 판독 미완료";
   if (/OUTSIDE_ANALYSIS_SCOPE|OUT_OF_SCOPE|분석 범위 밖/.test(text)) return "분석 범위 밖";
   if (/PRELIMINARY_TAGS_UNRESOLVED|트랙 미합의/.test(text)) return "주장 유형 미합의";
+  if (/SOURCE_VALIDATION|SOURCE_ATTESTATION|원문 위치 확인/.test(text)) return "근거 원문·위치 추가 확인";
   if (/blocked_rule_gap|규칙 미정/.test(text)) return "판정 규칙 미정";
   if (/blocked_evidence|EVIDENCE_INSUFFICIENT|미확인 요소/.test(text)) return "요소 근거 부족·미연결";
   if (/RELATION_TAGS_UNRESOLVED|linkage_unclear/.test(text)) return "주장·근거 연결 미확인";

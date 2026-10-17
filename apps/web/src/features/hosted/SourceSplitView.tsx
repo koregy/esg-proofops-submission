@@ -90,9 +90,10 @@ function SplitContent({ result, client, selection, onSelectClaim }: Props) {
           <button type="button" aria-label="PDF 축소" disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value - .5))}>−</button>
           <output>{Math.round(zoom * 100)}%</output><button type="button" aria-label="PDF 확대" disabled={zoom >= 3} onClick={() => setZoom(value => Math.min(3, value + .5))}>＋</button>
           <button type="button" onClick={() => setZoom(1)}>너비에 맞추기</button>
+          <button type="button" onClick={() => setZoom(3)}>표 글자 크게 보기</button>
         </div>
         {returnPage !== null && <button type="button" className="split-back" onClick={() => { setPage(returnPage); setEvidenceId(null); setReturnPage(null); }}>← 이전 p.{returnPage}로 돌아가기</button>}
-        <div className="split-jump-chips" aria-label="요소 근거 쪽 바로가기">{evidence.map(ref => <button type="button" key={ref.ref_id} disabled={!ref.physical_page} onClick={() => openEvidence(ref)}>{ref.element_id} · {ref.physical_page ? `p.${ref.physical_page}${ref.physical_page !== page ? " ↗" : ""}` : "위치 정보 없음"}</button>)}</div>
+        <details className="split-evidence-picker" key={claim?.claim_id}><summary>요소 근거 {evidence.length}개 · 펼쳐서 선택{activeEvidence ? ` · ${activeEvidence.element_id} p.${activeEvidence.physical_page} 선택됨` : ""}</summary><div className="split-jump-chips" aria-label="요소 근거 쪽 바로가기">{evidence.map(ref => <button type="button" key={ref.ref_id} disabled={!ref.physical_page} onClick={() => openEvidence(ref)}>{ref.element_id} · {ref.physical_page ? `p.${ref.physical_page}${ref.physical_page !== page ? " ↗" : ""}` : "위치 정보 없음"}</button>)}</div></details>
         <div className="split-legend"><span className="claim">노랑 · 주장</span><span className="evidence">파랑 · 선택한 요소 근거</span><span className="exact">채움 · 정확 인용 또는 표 셀 위치</span><span className="region">점선 · 영역 표시(정확 위치 아님)</span></div>
         {cells.length > 0 && <p className="split-note">표의 저장된 셀 위치 · {cells.map(ref => `${({ value: "값", unit: "단위", year: "연도" } as Record<string, string>)[ref.ref_id.split("/").at(-1)!] ?? "셀"}: ${ref.quote}`).join(" · ")}</p>}
         {activeEvidence && <p className="split-active-label" role="status">{activeEvidence.element_id} 근거 · p.{activeEvidence.physical_page}</p>}

@@ -1,3 +1,7 @@
+import { ux1CompanyName, uploadMetadata } from "./ux1Metadata";
+import { UX1_HASH } from "./ux1Model";
+import { UX1Progress } from "./UX1Progress";
+import { UX1Comparison } from "./UX1Comparison";
 import { documentName } from "./documentName";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -33,20 +37,17 @@ export function RuntimeOff({ runtime }: { runtime: Runtime }) {
 
 export function RunOutcomeView({ run }: { run: HostedRun }) {
   const outcome = runOutcome(run);
-  const steps = ["parse", "extract", "tag", "result"];
-  const current = steps.indexOf(run.stage ?? "");
   const progress = typeof run.progress === "number" && Number.isFinite(run.progress) ? Math.min(Math.max(run.progress, 0), 1) : null;
   return <div className={`hosted-outcome hosted-${outcome.kind}`} role="status" aria-live="polite">
     <p className="eyebrow">분석 진행</p>
-    <h3>{outcome.title}<small> · {run.selected_pages.join(", ")}쪽</small></h3>
+    <h3>{outcome.title}<small> · {new Set(run.selected_pages).size}쪽</small></h3>
     {outcome.kind === "pending" && <>
       <p>{statusLabel[run.status] ?? "상태 확인 중"}{run.stage ? ` · ${stageLabel[run.stage] ?? "후속 처리"}` : ""}
         {typeof run.queue_position === "number" && ` · 대기 순번 ${run.queue_position}`}
         {progress !== null && ` · 진행 ${Math.round(progress * 100)}%`}</p>
       <progress max={1} value={progress ?? undefined} aria-label="분석 진행률" />
-      <ol className="analysis-steps" aria-label="분석 단계">{steps.map((step, index) => <li key={step} className={index < current ? "done" : index === current ? "active" : ""} aria-current={index === current ? "step" : undefined}><b>{index + 1}. {stageLabel[step]}</b><span>{index < current ? "앞선 단계" : index === current ? "진행 중" : current < 0 ? "대기" : "다음 단계"}</span></li>)}</ol>
       {typeof run.claims_extracted === "number" && <p>추출된 주장 {run.claims_extracted}건 · 근거 대조 {run.claims_processed == null ? "집계 중" : `${run.claims_processed}건`}</p>}
-      <p className="hosted-note">예상 소요 약 20–45분 · 기존 15–30쪽 분석 사례 기준이며 문서와 대기 상황에 따라 달라집니다. 진행률은 단계별 추정치입니다.</p>
+      <UX1Progress run={run} />
       <p className="hosted-note">이 화면에서 결과가 자동으로 열립니다. 화면을 닫아도 내 보고서에서 진행 상태를 다시 확인할 수 있습니다.</p></>}
     {outcome.reasons.map(reason => <p key={reason}>{reason}</p>)}
   </div>;
@@ -165,7 +166,9 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
       try {
         if (new TextDecoder().decode(await file.slice(0, 4).arrayBuffer()) !== "%PDF") throw new Error("PDF 파일을 선택해 주세요.");
         if (runtime && file.size > runtime.limits.max_upload_bytes) throw new Error(`PDF가 ${Math.floor(runtime.limits.max_upload_bytes / 1048576)} MiB를 넘습니다.`);
-        const doc = await client.uploadDocument(file, undefined, controller.signal);
+        const metadata = { ...await uploadMetadata(file), policy_sha256: UX1_HASH };
+        if (controller.signal.aborted) break;
+        const doc = await client.uploadDocument(file, undefined, controller.signal, metadata);
         if (!controller.signal.aborted) { setIntake(items => [...items, { key, name: documentName(doc, file.name) ?? "분석 보고서", doc }]); remember(doc, documentName(doc, file.name) ?? "분석 보고서"); }
       } catch (err) {
         if (controller.signal.aborted) break;
@@ -229,6 +232,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
       <button className="hosted-secondary" type="submit">기존 결과 열기</button>
     </form>
     </div>
+    <UX1Comparison client={client} onFailure={fail} />
     <ul className="hosted-documents" aria-label="문서별 분석 상태">
       {intake.map(item => <li key={item.key}>
         {item.doc ? <HostedDocumentAnalysis name={item.name} doc={item.doc} client={client} runtime={runtime} session={session} initialRunId={item.restoreRunId} restored={item.restored} onAccepted={run => remember(item.doc!, item.name, run)} onExpired={expire} onRemoved={() => { setIntake(items => items.filter(next => next.doc?.document_id !== item.doc!.document_id)); if (session) setHistory(forgetDocumentHistory(historyStore, historyKey(session), item.doc!.document_id)); setNotice(`${item.name} 원본 PDF와 분석 기록을 삭제했습니다.`); }} />
@@ -364,13 +368,13 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
   async function showResult(finished: HostedRun, signal: AbortSignal) {
     if (finished.status !== "partial_blocked" && finished.status !== "completed") return;
     if (finished.result_url) {
-      const next = await client.getResult(finished.result_url, signal);
+      const next = await client.getResult(finished.result_url, signal, UX1_HASH);
       if (!signal.aborted) setResult(next);
     } else if (finished.result) setResult(finished.result);
   }
   async function reloadResult() {
     setError("");
-    try { if (run?.result_url) setResult(await client.getResult(run.result_url)); } catch (err) { fail(err); }
+    try { if (run?.result_url) setResult(await client.getResult(run.result_url, undefined, UX1_HASH)); } catch (err) { fail(err); }
   }
   async function cancel() {
     if (!run) return; setError(""); setBusy("취소 중");
@@ -452,7 +456,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
     {run && <RunOutcomeView run={result ? { ...run, result } : run} />}
     {run?.error_code && <p className="hosted-error">{holdReasonText(run.provider_error_code ?? run.error_code)}</p>}
     </IntakeSurface>
-    {result && run && <div ref={resultRegion} className="hosted-result-region"><ResultView reportName={documentName(doc, name)} companyName={doc.company_name} pageCount={doc.page_count} selectedPages={run.selected_pages} runStatus={run.status} result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} /></div>}
+    {result && run && <div ref={resultRegion} className="hosted-result-region"><ResultView reportName={documentName(doc, name)} companyName={ux1CompanyName(doc)} pageCount={doc.page_count} selectedPages={run.selected_pages} runStatus={run.status} result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} /></div>}
     {running && <button className="hosted-secondary" type="button" disabled={!!busy} onClick={() => void cancel()}>분석 취소</button>}
     <div className="hosted-document-footer">
     {doc && <p className="hosted-note">업로드한 PDF는 올린 본인 또는 작업 공간 관리자가 삭제할 수 있습니다. 삭제하면 원본과 분석 기록이 함께 지워집니다.</p>}

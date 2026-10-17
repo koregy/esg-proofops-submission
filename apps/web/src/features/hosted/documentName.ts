@@ -1,5 +1,5 @@
 /** Display only names supplied by the uploader/API, never infer a company from claims. */
-export type DocumentMetadata = { display_name?: string; company_name?: string; original_filename?: string; filename?: string; title?: string };
+export type DocumentMetadata = { ux1_metadata?: { original_filename?: string; title?: string; policy_sha256?: string }; display_name?: string; company_name?: string; original_filename?: string; filename?: string; title?: string };
 
 export function metadataText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -14,6 +14,7 @@ export function reportTitle(value: unknown): string | undefined {
 }
 
 export function documentName(document: DocumentMetadata, uploadedFilename?: string): string | undefined {
-  return [uploadedFilename, document.original_filename, document.filename, document.title, document.display_name].map(reportTitle).find(Boolean)
+  return [uploadedFilename, document.ux1_metadata?.original_filename, document.ux1_metadata?.title,
+    document.original_filename, document.filename, document.title, document.display_name].map(reportTitle).find(Boolean)
     ?? metadataText(document.company_name);
 }
