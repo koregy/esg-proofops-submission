@@ -354,3 +354,45 @@
   .example-card-heading { flex-wrap: wrap; }
   .example-card-heading h2 { font-size: 19px; }
 }
+
+/* Result tabs: one panel at a time; the bar sticks under the site header (--header-h set by the shell). */
+.hosted-result .result-tabs-anchor { height: 0 }
+.hosted-result .result-tabs { position: sticky; top: var(--header-h, 69px); z-index: 20; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 var(--space-6); background: var(--paper); box-shadow: inset 0 -1px 0 var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none }
+/* Swipe/trackpad still scroll the bar; the selected tab is scrolled into view in ResultTabs. */
+.hosted-result .result-tabs::-webkit-scrollbar { display: none }
+.hosted-analysis .hosted-result .result-tabs [role=tab] { display: grid; align-content: start; gap: 2px; min-width: 0; max-width: none; min-height: 56px; margin: 0; padding: 12px 16px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); text-align: left; white-space: nowrap; justify-self: stretch }
+.hosted-analysis .hosted-result .result-tabs [role=tab]:hover:not(:disabled) { background: var(--bg); color: var(--ink) }
+.hosted-analysis .hosted-result .result-tabs [role=tab][aria-selected=true] { color: var(--ink); border-bottom-color: var(--ink) }
+.hosted-analysis .hosted-result .result-tabs [role=tab]:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
+.hosted-result .result-tab-label { font-size: 15px; font-weight: 600 }
+.hosted-result .result-tab-badge { margin-left: 8px; font: 500 12px var(--mono); color: var(--muted) }
+.hosted-result .result-tab-hint { overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 400; color: var(--muted) }
+.hosted-result .result-tabpanel { display: grid; gap: var(--space-6); min-width: 0 }
+.hosted-result .result-tabpanel[hidden] { display: none }
+.hosted-result .result-tabpanel > .claims-section.result-claims { margin-top: 0 }
+.hosted-analysis .hosted-result .result-warning-badge { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; margin-top: var(--space-2); padding: 4px 12px; border-color: #865913; border-radius: 999px; background: var(--paper); color: #865913; font-size: 13px }
+.hosted-result .result-filter-chip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 var(--space-4); font-size: 13px; color: var(--ink-2) }
+.hosted-analysis .ux1-holds { padding-left: 0; list-style: none }
+.hosted-analysis .ux1-holds button { width: 100%; text-align: left; justify-self: stretch }
+@media (max-width: 960px) {
+  .hosted-result .result-tabs { display: flex }
+  .hosted-analysis .hosted-result .result-tabs [role=tab] { flex: 1 0 auto; min-height: 48px }
+  .hosted-result .result-tab-hint { display: none }
+}
+@media (max-width: 600px) {
+  .hosted-analysis .hosted-result .result-tabs [role=tab] { flex: 0 0 auto; padding: 12px 14px }
+}
+
+/* While a result is open the page-level intake folds into one breadcrumb line. */
+.hosted-analysis .hosted-result-bar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; padding: var(--space-3) 0; border-bottom: 1px solid var(--line) }
+.hosted-analysis .hosted-result-bar p { margin: 0; min-width: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere }
+.hosted-analysis .hosted-result-bar strong { color: var(--ink) }
+.hosted-analysis .hosted-result-bar code { font: 500 13px var(--mono) }
+.hosted-analysis .hosted-intake-area { display: grid; gap: inherit; min-width: 0 }
+.hosted-analysis [hidden] { display: none !important }
+.analyze-main:has(> .hosted-analysis.is-intake-collapsed) > h1 { display: none }
+
+@media print {
+  .hosted-result .result-tabs, .hosted-analysis .hosted-result-bar { display: none !important }
+  .hosted-result .result-tabpanel[hidden] { display: grid !important }
+}

@@ -46,8 +46,8 @@
 .serif { font-family: var(--serif); font-weight: 400; letter-spacing: -.01em }
 .hero { max-width: 1100px; margin: 0 auto; padding: 96px 40px 110px; text-align: center }
 .hero h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 4.4vw, 58px); line-height: 1.22; letter-spacing: -.02em; color: var(--ink); animation: rise .9s var(--ease) both }
-.hero-sub { max-width: 760px; margin: 26px auto 34px !important; font-size: 17.5px; line-height: 1.75; color: var(--ink-2); animation: rise .9s .08s var(--ease) both }
-.hero > .pill { height: 50px; padding: 0 26px; font-size: 15px; animation: rise .9s .16s var(--ease) both }
+.hero-sub { max-width: 760px; margin: 40px auto 18px !important; font-size: 16px; line-height: 1.75; color: var(--ink-2); animation: rise .9s .08s var(--ease) both }
+.hero > .pill { position: relative; top: 40px; height: 50px; padding: 0 26px; font-size: 15px; animation: rise .9s .16s var(--ease) both }
 @keyframes rise { from { opacity: 0; transform: translateY(16px) } }
 @keyframes appear { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
 .prompt { max-width: 680px; margin: 72px auto 0; text-align: left; background: #fff; border: 1px solid var(--card-line); border-radius: 16px; padding: 16px 16px 12px; box-shadow: 0 1px 2px rgba(22, 22, 22, .04), 0 12px 32px -18px rgba(22, 22, 22, .18); animation: rise 1s .24s var(--ease) both; transition: box-shadow .25s, border-color .25s }
@@ -194,8 +194,9 @@ a.card:hover, .features .card:hover, .steps .card:hover { transform: translateY(
 /* claims */
 .claims-section { background: #fff; border: 1px solid var(--card-line); border-radius: 14px; padding: 32px; margin-bottom: 40px }
 .claims-section .card-heading p:last-child { color: var(--muted); font-size: 14px; margin-top: 8px }
-.queue-tabs { display: flex; gap: 32px; border-bottom: 1px solid var(--line); margin: 36px 0 28px; overflow-x: auto }
-.queue-tabs button { white-space: nowrap; min-height: 0; border: 0; border-radius: 0; border-bottom: 1px solid transparent; margin-bottom: -1px; padding: 10px 0 14px; background: none; color: var(--muted); font-size: 14px; font-weight: 600 }
+/* Inset rule instead of a border: tabs' underline overlays it without overflowing the scroll box. */
+.queue-tabs { display: flex; gap: 32px; box-shadow: inset 0 -1px 0 var(--line); margin: 36px 0 28px; overflow-x: auto; overflow-y: hidden }
+.queue-tabs button { white-space: nowrap; min-height: 0; border: 0; border-radius: 0; border-bottom: 1px solid transparent; margin-bottom: 0; padding: 10px 0 14px; background: none; color: var(--muted); font-size: 14px; font-weight: 600 }
 .queue-tabs button:hover:not(:disabled) { color: var(--ink) }
 .queue-tabs button[aria-selected=true] { border-color: var(--ink); color: var(--ink) }
 .queue-tabs span { margin-left: 8px; font: 500 12px var(--mono); color: var(--muted) }
@@ -343,7 +344,7 @@ a.card:hover, .features .card:hover, .steps .card:hover { transform: translateY(
   .site-header nav.open { display: flex } .site-header nav a { padding: 12px 0; width: 100%; font-size: 16px }
   .menu-toggle { display: inline-flex; gap: 8px; min-height: 36px; padding: 0 14px; font-size: 13px; background: #fff }
   .header-actions { display: none }
-  .hero { padding: 64px 20px 80px } .hero-sub { font-size: 16px }
+  .hero { padding: 64px 20px 80px } .hero-sub { font-size: 15px }
   .prompt { margin-top: 48px } .chips .chip:nth-child(n+3) { display: none }
   .sec { padding: 84px 20px } .sec h2.serif { margin-bottom: 40px }
   .steps, .features, .tools { grid-template-columns: 1fr }
@@ -357,7 +358,7 @@ main.landing > section.sec { padding: 120px 40px }
 main.landing > section.hero { padding: 96px 40px 110px }
 .demo-site .sec > * { margin-left: auto; margin-right: auto }
 .demo-site .sec > h2.serif { margin-bottom: 64px }
-.demo-site .hero-sub { margin: 26px auto 34px }
+.demo-site .hero-sub { margin: 40px auto 18px }
 .demo-site .prompt { margin: 72px auto 0 }
 @media (max-width: 760px) { main.landing > section.sec { padding: 84px 20px } main.landing > section.hero { padding: 64px 20px 80px } .demo-site .sec > h2.serif { margin-bottom: 40px } .demo-site .prompt { margin-top: 48px } }
 
@@ -405,7 +406,7 @@ main.landing > section.hero { padding: 96px 40px 110px }
 .live-report-sections small { color: var(--muted) }
 .live-report-sections p, .live-report-selection { color: var(--muted) !important; font-size: 12px !important; line-height: 1.7; overflow-wrap: anywhere }
 .live-report-selection { margin-top: 12px !important }
-.hero h1.hero-brand { font-size: clamp(64px, 9vw, 128px); line-height: 1.02; letter-spacing: -.035em; margin-top: 8px }
+.hero h1.hero-brand { font-size: clamp(70px, 10vw, 140px); line-height: 1.02; letter-spacing: -.035em; margin-top: 8px }
 /* Element glossary: three aligned columns instead of one long list */
 .decision-guide > h3 { font-size: 17px; margin: 44px 0 16px; padding-top: 18px; border-top: 1px solid var(--line-2) }
 .guide-elements { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 40px; margin-top: 0 }

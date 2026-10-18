@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { HostedClient, HostedResult, ResultClaim, SourceViewRef } from "./hostedClient";
-import { resultBrowserItem, w18HoldReason } from "./resultModel";
+import { holdReasonLabel, resultBrowserItem, w18HoldReason } from "./resultModel";
 import { displayRefs, sourceHighlight, uniqueEvidence, selectedSourceRef } from "./sourceSplitModel";
 
 const OriginalPdfPage = lazy(() => import("./OriginalPdfPage"));
@@ -9,9 +9,9 @@ type Props = { result: HostedResult; client: HostedClient; selection?: SourceSel
 
 export function SourceSplitView({ result, client, selection, onSelectClaim }: Props) {
   const [opened, setOpened] = useState(true);
-  const section = useRef<HTMLElement>(null);
-  useEffect(() => { if (selection) { setOpened(true); if (selection.scroll !== false) section.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, [selection]);
-  return <section ref={section} className="source-split" aria-label="원문 나란히 보기">
+  // The parent result tabs bring this panel into view; here a selection only reopens the split.
+  useEffect(() => { if (selection) setOpened(true); }, [selection]);
+  return <section className="source-split" aria-label="원문 나란히 보기">
     <div className="split-heading"><div><h3>원문 보기</h3><p>주장과 요소 근거를 원본 PDF에서 함께 확인하세요.</p></div>
       <button type="button" aria-expanded={opened} onClick={() => setOpened(value => !value)}>{opened ? "나란히 보기 닫기" : "원문 나란히 보기"}</button></div>
     {opened && (result.w16_source_document ? <SplitContent result={result} client={client} selection={selection} onSelectClaim={onSelectClaim} /> : <p role="status">원본을 사용할 수 없습니다. 이 저장 결과에는 PDF 연결 정보가 없습니다. 위치 정보 없음.</p>)}
@@ -78,7 +78,7 @@ function SplitContent({ result, client, selection, onSelectClaim }: Props) {
           return <button type="button" key={item.claim_id} className={`split-claim ${item.claim_id === claim?.claim_id ? "selected" : ""} ${onPage ? "on-page" : ""}`} data-current-page={onPage || undefined} aria-pressed={item.claim_id === claim?.claim_id}
             onClick={() => select(item, true)}>
             <span className={`split-status ${status}`}>{summary.badge}</span><small>{summary.page}{onPage ? " · 보고 있는 쪽" : ""}</small>
-            <p>{item.quote}</p>{w18HoldReason(result, item) && <small className="w18-hold-reason">보류 · {w18HoldReason(result, item)}</small>}{!displayRefs(item).some(ref => ref.kind === "claim" && sourceHighlight(ref).boxes.length > 0) && <small>위치 미확인</small>}
+            <p>{item.quote}</p>{w18HoldReason(result, item) && <small className="w18-hold-reason" title={w18HoldReason(result, item)!}>보류 · {holdReasonLabel(w18HoldReason(result, item)!)}</small>}{!displayRefs(item).some(ref => ref.kind === "claim" && sourceHighlight(ref).boxes.length > 0) && <small>위치 미확인</small>}
           </button>;
         })}</div>
       </aside>
@@ -94,7 +94,7 @@ function SplitContent({ result, client, selection, onSelectClaim }: Props) {
         </div>
         {returnPage !== null && <button type="button" className="split-back" onClick={() => { setPage(returnPage); setEvidenceId(null); setReturnPage(null); }}>← 이전 p.{returnPage}로 돌아가기</button>}
         <details className="split-evidence-picker" key={claim?.claim_id}><summary>요소 근거 {evidence.length}개 · 펼쳐서 선택{activeEvidence ? ` · ${activeEvidence.element_id} p.${activeEvidence.physical_page} 선택됨` : ""}</summary><div className="split-jump-chips" aria-label="요소 근거 쪽 바로가기">{evidence.map(ref => <button type="button" key={ref.ref_id} disabled={!ref.physical_page} onClick={() => openEvidence(ref)}>{ref.element_id} · {ref.physical_page ? `p.${ref.physical_page}${ref.physical_page !== page ? " ↗" : ""}` : "위치 정보 없음"}</button>)}</div></details>
-        <div className="split-legend"><span className="claim">노랑 · 주장</span><span className="evidence">파랑 · 선택한 요소 근거</span><span className="exact">채움 · 정확 인용 또는 표 셀 위치</span><span className="region">점선 · 영역 표시(정확 위치 아님)</span></div>
+        <div className="split-legend"><span className="claim">주장</span><span className="evidence">선택한 요소 근거</span><span className="exact">정확 인용·표 셀</span><span className="region">영역 표시(정확 위치 아님)</span></div>
         {cells.length > 0 && <p className="split-note">표의 저장된 셀 위치 · {cells.map(ref => `${({ value: "값", unit: "단위", year: "연도" } as Record<string, string>)[ref.ref_id.split("/").at(-1)!] ?? "셀"}: ${ref.quote}`).join(" · ")}</p>}
         {activeEvidence && <p className="split-active-label" role="status">{activeEvidence.element_id} 근거 · p.{activeEvidence.physical_page}</p>}
         <Suspense fallback={<p role="status">PDF 뷰어 준비 중…</p>}><OriginalPdfPage key={attempt} sourceSha={result.w16_source_document!.sha256} url={url} pageNumber={page} refs={highlights} zoom={zoom} onPageCount={setPageCount} /></Suspense>

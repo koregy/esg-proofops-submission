@@ -1,6 +1,6 @@
 import type { HostedResult, ResultClaim } from "./hostedClient";
 import { analyzedData, claimExplanation, gradeMeanings, reportInsights } from "./ux1Model";
-import { resultScope, w18HoldBreakdown } from "./resultModel";
+import { holdReasonLabel, resultBrowserSummary, resultScope, w18HoldBreakdown } from "./resultModel";
 
 export function GradeGuide() {
   return <section className="ux1-card ux1-grade-guide" aria-label="등급 의미"><p className="eyebrow">결과 읽는 법</p><h3>등급은 주장을 뒷받침하는 근거의 수준입니다</h3>
@@ -13,14 +13,69 @@ export function WhyGrade({ result, claim }: { result: HostedResult; claim: Resul
   const explanation = claimExplanation(result, claim);
   return <section className="ux1-why" aria-label="왜 이 등급인지"><h4>왜 이 등급인가요?</h4><p>{explanation.text}</p>{explanation.rules.length>0 && <details><summary>적용 규칙 {explanation.rules.length}개</summary><p>{explanation.rules.join(" · ")}</p></details>}</section>;
 }
-export function ExecutiveSummary({ result, onSelect }: { result: HostedResult; onSelect: (id: string)=>void }) {
-  const insight = reportInsights(result), holds = w18HoldBreakdown(result);
+export function HoldReasonList({ result, onHoldReason }: { result: HostedResult; onHoldReason?: (reason: string)=>void }) {
+  const holds = w18HoldBreakdown(result);
+  return holds.length ? <ul className="ux1-holds">{holds.slice(0,3).map(h=><li key={h.reason}>{onHoldReason
+    ? <button type="button" title={h.reason} onClick={()=>onHoldReason(h.reason)}>{holdReasonLabel(h.reason)}<b>{h.count}건</b></button>
+    : <span title={h.reason}>{holdReasonLabel(h.reason)} · <b>{h.count}건</b></span>}</li>)}</ul> : <p>보류 주장이 없습니다.</p>;
+}
+const pct = (n: number, d: number) => d ? Math.round(n / d * 100) : 0;
+const gradeRows = [
+  { key: "E3", label: "입증요소 충분", color: "var(--g3)" },
+  { key: "E2", label: "추가 입증 필요", color: "var(--g2)" },
+  { key: "E1", label: "확인 요소 부족", color: "var(--g1)" },
+  { key: "E0", label: "입증요소 부재", color: "var(--g0)" },
+];
+/** Overview dashboard: one-line insight, four counts, status bar with hold reasons, confirmed grade distribution. */
+export function ResultDashboard({ result, pageCount, selectedPages, onHoldReason }: { result: HostedResult; pageCount?: number; selectedPages?: number[]; onHoldReason?: (reason: string)=>void }) {
+  const counts = resultBrowserSummary(result), scope = resultScope(result, pageCount ?? result.w16_source_document?.page_count, selectedPages);
+  const byTrack = new Map<string, number>();
+  for (const row of reportInsights(result).needs) byTrack.set(row.track, (byTrack.get(row.track) ?? 0) + row.count);
+  const needs = [...byTrack].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  const needsTotal = needs.reduce((sum, row) => sum + row.count, 0);
+  const { total, confirmed, provisional, hold } = counts, e0 = counts.confirmedGrades.E0 ?? 0;
+  const status = [
+    { label: "확정", n: confirmed, color: "var(--g3)" },
+    ...(provisional ? [{ label: "잠정", n: provisional, color: "var(--g1)" }] : []),
+    { label: "보류", n: hold, color: "var(--hold)" },
+  ];
+  return <section className="rd-overview" aria-label="보고서 요약">
+    <div className="rd-insight"><span>핵심 요약</span><p>
+      {confirmed ? <>확정 {confirmed}건 중 {e0 ? <b>{e0}건({pct(e0, confirmed)}%)이 근거 부재(E0)</b> : "근거 부재(E0)는 없"}{e0 ? "입니다." : "습니다."}</> : <>확정된 주장이 없습니다. 보류 {hold}건의 사유를 먼저 확인하세요.</>}
+      {needs.length > 0 && <> 보강이 필요한 {needsTotal}건 중 <b>{needs[0].label} {needs[0].count}건</b>부터 확인하세요.</>}
+    </p></div>
+    <div className="rd-kpis">
+      <div><span>추출 주장</span><strong>{total}<small>건</small></strong><em>분석 범위 {scope.pages.length}{scope.total !== null && ` / ${scope.total}`}쪽<br />원문 검증 {counts.verified}건</em></div>
+      <div className="rd-key"><span>확정</span><strong>{confirmed}<small>건</small></strong><em>전체의 {pct(confirmed, total)}%<br />근거로 판정 완료</em></div>
+      <div><span>보류</span><strong>{hold}<small>건</small></strong><em>전체의 {pct(hold, total)}%<br />추가 확인 필요{provisional ? ` · 잠정 ${provisional}건` : ""}</em></div>
+      <div><span>근거 보강 필요</span><strong>{needsTotal}<small>건</small></strong><em>빠진 요소가 있는 확정 주장{needs.length > 0 && <><br />{needs.map(row => `${row.label} ${row.count}`).join(" · ")}</>}</em></div>
+    </div>
+    <div className="rd-panels">
+      <div className="rd-panel">
+        <header><h3>판정 상태</h3><span>전체 {total}건</span></header>
+        <div className="rd-bar" role="img" aria-label={status.map(s => `${s.label} ${s.n}건`).join(", ")}>{total > 0 && status.map(s => s.n > 0 && <i key={s.label} style={{ width: `${s.n / total * 100}%`, background: s.color }} />)}</div>
+        <div className="rd-legend">{status.map(s => <span key={s.label}><i className="rd-sw" style={{ background: s.color }} />{s.label}<b>{s.n}</b></span>)}</div>
+        <h4 className="rd-holds-h">주요 보류 사유</h4>
+        <HoldReasonList result={result} onHoldReason={onHoldReason} />
+      </div>
+      <div className="rd-panel">
+        <header><h3>근거 등급 분포</h3><span>확정 {confirmed}건 기준</span></header>
+        {confirmed ? <>
+          <div className="rd-bar" role="img" aria-label={gradeRows.map(g => `${g.key} ${counts.confirmedGrades[g.key] ?? 0}건`).join(", ")}>{gradeRows.map(g => (counts.confirmedGrades[g.key] ?? 0) > 0 && <i key={g.key} style={{ width: `${(counts.confirmedGrades[g.key] ?? 0) / confirmed * 100}%`, background: g.color }} />)}</div>
+          <div className="rd-rows">{gradeRows.map(g => <div className="rd-row" key={g.key}><b><i className="rd-sw" style={{ background: g.color }} />{g.key}</b><span>{g.label}</span><strong>{counts.confirmedGrades[g.key] ?? 0}건</strong><em>{pct(counts.confirmedGrades[g.key] ?? 0, confirmed)}%</em></div>)}</div>
+        </> : <p className="caption">확정된 주장이 없습니다. 보류는 E0나 근거 부재가 아닙니다.</p>}
+      </div>
+    </div>
+  </section>;
+}
+export function ExecutiveSummary({ result, onSelect, onHoldReason, holds = true }: { result: HostedResult; onSelect: (id: string)=>void; onHoldReason?: (reason: string)=>void; holds?: boolean }) {
+  const insight = reportInsights(result);
   return <section className="ux1-card" aria-label="보고서 종합 요약"><p className="eyebrow">다음 검토를 위한 요약</p><h3>어디부터 근거를 보강할까요?</h3>
     <div className="ux1-summary-grid"><div><h4>근거 보강 필요 영역</h4><p className="caption">E0–E2 확정 주장 중 근거 없음 요소가 있는 항목 · 한 주장을 한 영역에 집계. 조건부 요소를 포함하며 모두 등급 상승 조건인 것은 아닙니다.</p>
       {insight.needs.length ? <ul className="ux1-needs">{insight.needs.slice(0,5).map(row=><li key={row.track+row.metric}><b>{row.track}{row.metric && ` · ${row.metric}`}</b><strong>{row.count}건</strong><span>{[...row.elements].join(" · ")}</span></li>)}</ul> : <p>확정 주장에 기록된 보강 영역이 없습니다. 보류 상태는 따로 확인하세요.</p>}
       {insight.needs.length>5 && <details><summary>나머지 {insight.needs.length-5}개 영역</summary><ul>{insight.needs.slice(5).map(row=><li key={row.track+row.metric}>{row.track}{row.metric && ` · ${row.metric}`}: {row.count}건 · {[...row.elements].join(" · ")}</li>)}</ul></details>}
     </div><div><h4>주요 확정 주장 {insight.top.length}개</h4><p className="caption">근거 등급 높은 순 · 같은 등급은 원본 쪽 순</p>{insight.top.length ? <ol className="ux1-top">{insight.top.map(item=><li key={item.claim.claim_id}><button type="button" onClick={()=>onSelect(item.claim.claim_id)}><b>{item.grade} · {item.page}</b><span>{item.claim.quote}</span></button></li>)}</ol> : <p>확정 주장이 없습니다.</p>}
-      <h4>주요 보류 사유</h4>{holds.length ? <ul>{holds.slice(0,3).map(h=><li key={h.reason}>{h.reason} · <b>{h.count}건</b></li>)}</ul> : <p>보류 주장이 없습니다.</p>}
+      {holds && <><h4>주요 보류 사유</h4><HoldReasonList result={result} onHoldReason={onHoldReason} /></>}
     </div></div>
   </section>;
 }

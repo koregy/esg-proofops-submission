@@ -1,7 +1,7 @@
 async page => {
   const base = page.url().startsWith('http') ? new URL(page.url()).origin : 'http://127.0.0.1:5207';
   await page.goto(`${base}/`);
-  await page.getByRole('region', { name: 'PDF 업로드 안내' }).waitFor();
+  await page.locator('.hero').waitFor();
   if (await page.getByLabel('분석 요청', { exact: true }).count()) throw new Error('Discarded prompt remains');
   if (/재무제표|그린워싱으로 판별/.test(await page.locator('.hero').textContent())) throw new Error('Out-of-scope examples remain');
   await page.goto(`${base}/demo`);

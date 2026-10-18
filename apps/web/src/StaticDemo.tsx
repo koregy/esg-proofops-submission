@@ -20,6 +20,7 @@ import { HostedExamples } from "./features/hosted/HostedExamples";
 import { createHostedClient, resolveBackend } from "./features/hosted/hostedClient";
 import "./features/hosted/hosted.css";
 import "./static-demo.css";
+import "./features/hosted/result-design.css";
 
 const analysisBackend = resolveBackend(import.meta.env.VITE_ANALYSIS_BACKEND);
 
@@ -58,6 +59,7 @@ export function StaticDemo() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [error, setError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const siteHeader = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!needsSnapshot) return;
     const controller = new AbortController();
@@ -77,8 +79,18 @@ export function StaticDemo() {
     sections.forEach(section => observer.observe(section));
     return () => observer.disconnect();
   }, [location.pathname, data]);
+  useEffect(() => {
+    // Sticky children (result tabs) sit below the header; publish its live height instead of hard-coding it.
+    const header = siteHeader.current;
+    if (!header || !window.ResizeObserver) return;
+    const publish = () => document.documentElement.style.setProperty("--header-h", `${header.getBoundingClientRect().height}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
   return <div className="demo-site">
-    <header className="site-header"><div className="site-header-inner">
+    <header className="site-header" ref={siteHeader}><div className="site-header-inner">
       <Link className="brand" to="/" aria-label="ProofOps 홈"><span className="brand-dot" aria-hidden="true" />ProofOps</Link>
       <button className="menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="site-menu" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? "닫기" : "메뉴"}<span aria-hidden="true">{menuOpen ? "×" : "☰"}</span></button>
       <nav id="site-menu" className={menuOpen ? "open" : ""} aria-label="주요 메뉴" onClick={() => setMenuOpen(false)}><Link to="/">서비스</Link><Link to="/analyze">분석</Link><Link to="/demo">분석 사례</Link><Link to="/guide">서비스 가이드라인</Link></nav>
@@ -153,14 +165,8 @@ function Landing() {
     <section className="hero">
       <p className="eyebrow-c">ESG · 지속가능경영보고서 공시 근거 점검</p>
       <h1 className="hero-brand">ProofOps</h1>
-      <p className="hero-sub">공시를 내기 전, 환경 주장을 뒷받침할 근거부터 확인하세요. ProofOps는 보고서 속 주장과 원문을 연결하고, 보완할 근거와 검토할 문장을 정리해 그린워싱 위험을 예방하는 검토를 돕습니다.</p>
+      <p className="hero-sub">기업 보고서 내 환경 주장의 근거를 공시 안에서 찾으며, 규칙엔진을 기반으로 근거 수준을 판정합니다.<br />근거에 대한 쪽수·원문 인용 또는 확인 범위가 함께 표시됩니다.</p>
       <Link className="pill pill-dark" to="/analyze">보고서 분석 시작 <span aria-hidden="true">→</span></Link>
-      <div className="prompt" role="region" aria-label="PDF 업로드 안내">
-        <h2>보고서 PDF로 공시 근거를 점검하세요</h2>
-        <p>지속가능경영보고서 PDF를 올린 뒤 분석할 쪽을 확인하세요. 공시 문장의 원문 근거 수준을 점검하며 진위나 위법 여부를 판정하지 않습니다.</p>
-        <div className="prompt-bar"><div className="chips"><Link to="/analyze" className="chip"><span className="ic">⬆</span>PDF 업로드</Link><Link to="/demo" className="chip"><span className="ic">◎</span>분석 사례</Link><Link to="/guide" className="chip"><span className="ic">◇</span>서비스 가이드라인</Link></div></div>
-      </div>
-      <p className="hero-note">PDF를 올리면 분석할 쪽을 골라 바로 분석합니다</p>
     </section>
 
     <section className="sec sec-cream">
