@@ -184,6 +184,59 @@ test('history names resolve filename metadata across identical uploads without u
   const { reportNames }=require('./documentName.ts');
   const docs=[{document_id:'named',sha256:'same',ux1_metadata:{original_filename:'Kakao_SustainabilityReport2025_KR.pdf'}},{document_id:'legacy',sha256:'same',display_name:'분석 보고서'},{document_id:'unknown',sha256:'other',display_name:'분석 보고서'}];
   const names=reportNames(docs);
-  assert.equal(names.legacy,'Kakao_SustainabilityReport2025_KR');
+  assert.equal(names.legacy,'Kakao 2025 지속가능경영보고서');
   assert.equal(names.unknown,undefined);
+});
+
+const extractionCases = [
+  [{ status: 'partial', failed_sources: [{ source_id: 'unprocessed-1', physical_page: 24 }, { source_id: 'unprocessed-2', physical_page: 25 }] }, '분석 완료 · 미처리 원문 2건'],
+  [{ status: 'partial', page_failures: [{ physical_page: 24, code: 'PARSER_TIMEOUT' }, { physical_page: 25, code: 'PARSER_MEMORY_LIMIT' }] }, '분석 완료 · 미처리 2쪽'],
+  [{ status: 'partial', failed_sources: [{ source_id: 'unprocessed-1', physical_page: 24 }], page_failures: [{ physical_page: 25, code: 'PARSER_TIMEOUT' }] }, '분석 완료 · 미처리 원문 1건 · 미처리 1쪽'],
+];
+for (const [extraction_outcome, title] of extractionCases) test(`current-policy extraction-only partial is shown honestly: ${title}`, async () => {
+  const { loadExamples, CURRENT_EXAMPLE_POLICY } = require('./exampleCatalog.ts');
+  const { resultExecution } = require('./hostedClient.ts');
+  const result = { ...fixture, pipeline: { ...fixture.pipeline, status: 'completed', scope: { analysis_profile_sha256: CURRENT_EXAMPLE_POLICY }, extraction_outcome } };
+  const before = JSON.stringify(result);
+  const run = { run_id: 'partial', document_id: 'doc', status: 'completed', created_at: '2026-10-18', result_url: '/partial' };
+  const examples = await loadExamples({ listDocuments: async () => ({ items: [{ document_id: 'doc', sha256: 'same', original_filename: '2025_기아_지속가능경영보고서.pdf' }], next_cursor: null }), listRuns: async () => ({ items: [run], next_cursor: null }), getResult: async () => result }, new AbortController().signal);
+  assert.equal(examples.length, 1);
+  assert.equal(examples[0].completion.title, title);
+  assert.deepEqual(examples[0].counts, require('./resultModel.ts').resultBrowserSummary(fixture));
+  assert.equal(resultExecution(result, 'completed').kind, 'partial');
+  const screen = render(React.createElement(ResultView, { result, runStatus: 'completed' }));
+  assert.ok(screen.includes(`data-testid="result-completion-status">${title}</p>`));
+  assert.match(screen, /미처리 원문은 판정하지 않았습니다/);
+  assert.equal(JSON.stringify(result), before);
+});
+
+test('showcase still rejects unsuccessful run/pipeline/extraction states and unquantified partials', async () => {
+  const { chooseExample, CURRENT_EXAMPLE_POLICY } = require('./exampleCatalog.ts');
+  const result = { ...fixture, pipeline: { status: 'completed', scope: { analysis_profile_sha256: CURRENT_EXAMPLE_POLICY }, extraction_outcome: extractionCases[0][0] } };
+  const run = { run_id: 'partial', status: 'completed', created_at: '2026-10-18', result_url: '/partial' };
+  for (const status of ['partial_blocked', 'failed', 'cancelled', 'accounting_pending', 'blocked', 'unknown', 'queued', 'running']) {
+    assert.equal(await chooseExample([{ ...run, status }], async () => { throw new Error('must not read excluded runs'); }), null, status);
+    assert.equal(await chooseExample([run], async () => ({ ...result, pipeline: { ...result.pipeline, status } })), null, `pipeline ${status}`);
+    assert.equal(await chooseExample([run], async () => ({ ...result, pipeline: { ...result.pipeline, extraction_outcome: { ...extractionCases[0][0], status } } })), null, `extraction ${status}`);
+  }
+  assert.equal(await chooseExample([run], async () => ({ ...result, pipeline: { ...result.pipeline, extraction_outcome: { status: 'partial' } } })), null);
+  assert.equal(await chooseExample([run], async () => ({ ...result, pipeline: { ...result.pipeline, scope: { analysis_profile_sha256: 'old-policy' } } })), null);
+  assert.equal(await chooseExample([run], async () => ({ ...result, pipeline: { ...result.pipeline, scope: {} } })), null, 'partial results require the current policy');
+});
+
+test('same PDF prefers a current fully completed result, otherwise its newest current partial', async () => {
+  const { loadExamples, chooseExample, CURRENT_EXAMPLE_POLICY } = require('./exampleCatalog.ts');
+  const partial = { ...fixture, pipeline: { status: 'completed', scope: { analysis_profile_sha256: CURRENT_EXAMPLE_POLICY }, extraction_outcome: extractionCases[0][0] } };
+  const full = { ...partial, pipeline: { ...partial.pipeline, extraction_outcome: { status: 'completed' } } };
+  // Production publishes successful extraction as status 'claims'; it must count as fully completed.
+  const claims = { ...partial, pipeline: { ...partial.pipeline, extraction_outcome: { status: 'claims', code: 'OK' } } };
+  assert.equal((await chooseExample([{ run_id: 'claims', status: 'completed', created_at: '2026-10-18', result_url: '/claims' }], async () => claims)).completion.kind, 'completed');
+  const runs = ['new-partial', 'older-partial', 'full', 'old-full'].map((run_id, i) => ({ run_id, document_id: i % 2 ? 'copy' : 'original', status: 'completed', created_at: `2026-10-${18-i}`, result_url: '/' + run_id }));
+  const read = async url => url === '/full' ? full : url === '/old-full' ? { ...full, pipeline: { ...full.pipeline, scope: { analysis_profile_sha256: 'old-policy' } } } : partial;
+  assert.equal((await chooseExample(runs, read)).run.run_id, 'full');
+  assert.equal((await chooseExample(runs.filter(r => r.run_id !== 'full'), read)).run.run_id, 'new-partial');
+  const docs = ['original', 'copy'].map(document_id => ({ document_id, sha256: 'identical-pdf', original_filename: '2025_기아_지속가능경영보고서.pdf' }));
+  const examples = await loadExamples({ listDocuments: async () => ({ items: docs, next_cursor: null }), listRuns: async () => ({ items: runs, next_cursor: null }), getResult: read }, new AbortController().signal);
+  assert.equal(examples.length, 1);
+  assert.equal(examples[0].run.run_id, 'full');
 });

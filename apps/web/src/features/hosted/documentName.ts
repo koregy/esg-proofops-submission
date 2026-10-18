@@ -8,14 +8,23 @@ export function metadataText(value: unknown): string | undefined {
 }
 
 export function reportTitle(value: unknown): string | undefined {
-  const text = metadataText(metadataText(value)?.replace(/\.pdf$/i, "").trim());
+  const supplied = metadataText(value);
+  const text = supplied && metadataText(cleanReportName(supplied));
   if (!text || /^(?:(?:기존 )?보고서(?:\s*·?\s*(?:\d+쪽|\d+|[a-f0-9]{8}))?|분석 보고서)$/i.test(text)) return undefined;
   return text;
 }
 
 export function documentName(document: DocumentMetadata, uploadedFilename?: string): string | undefined {
-  return [uploadedFilename, document.ux1_metadata?.original_filename, document.ux1_metadata?.title,
-    document.original_filename, document.filename, document.title, document.display_name].map(reportTitle).find(Boolean)
+  const titles = [document.ux1_metadata?.title, document.title]
+    .filter(value => !/^(?:Microsoft (?:Word|Excel|PowerPoint)\b|Untitled\b)/i.test(value?.trim() ?? ""));
+  // Require Hangul in the supplied title too: translating an English filename
+  // convention must not make English-only PDF metadata outrank an upload name.
+  const koreanTitle = titles.filter(value => /[가-힣]/.test(value ?? "")).map(reportTitle)
+    .find(title => title && /[가-힣]/.test(title) && !/^(?:(?:20\d{2}년?\s*)?(?:지속가능(?:경영)?보고서|통합보고서|보고서)|(?:내부\s*)?제목(?:\s*없음)?|무제|새\s*문서)(?:\s*20\d{2}년?)?$/i.test(title));
+  return koreanTitle
+    ?? [uploadedFilename, document.ux1_metadata?.original_filename, document.original_filename, document.filename].map(reportTitle).find(Boolean)
+    ?? titles.map(reportTitle).find(Boolean)
+    ?? reportTitle(document.display_name)
     ?? metadataText(document.company_name);
 }
 
@@ -29,8 +38,17 @@ export function reportNames(documents: (DocumentMetadata & { document_id: string
   return Object.fromEntries(documents.map(doc => [doc.document_id, documentName(doc) ?? (doc.sha256 ? bySha.get(doc.sha256) : undefined)]));
 }
 
+/** Shared display normalization; source filenames/metadata remain untouched. */
 export function cleanReportName(name: string): string {
-  const file = name.replace(/^.*[/\\]/, "").replace(/\.pdf$/i, "");
-  const match = /^(.+?)[_ -]+Sustainability[_ -]*Report[_ -]*(20\d{2})(?:[_ -]+(?:KOR|KR|ENG|EN))?$/i.exec(file);
-  return match ? `${match[1].replace(/_/g, " ")} ${match[2]} 지속가능경영보고서` : file.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  // Titles can contain markup-like text; preserve it for the renderer to escape.
+  const file = (/[<>]/.test(name) ? name : name.replace(/^.*[/\\]/, "")).trim().replace(/\.pdf$/i, "");
+  const text = file.replace(/_/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/(20\d{2})(?:(?:[ -]*(?:final|korean|kor|eng|kr|en|fn|f|k)|[ -]*\((?:kor|kr|korean|eng|en)\)))+$/i, "$1");
+  const title = /20\d{2}/.test(text)
+    ? text.replace(/(?:[ -]+(?:final|korean|kor|eng|kr|en|fn|f|k|\((?:kor|kr|korean|eng|en)\)))+$/i, "")
+    : text;
+  const companyFirst = /^(.+?)[ -]+Sustainability[ -]*Report[ -]*(20\d{2}(?:[-–]20\d{2})?)(?:[ -]+(?:Korean|KOR|KR|ENG|EN))?$/i.exec(title);
+  if (companyFirst) return `${companyFirst[1]} ${companyFirst[2]} 지속가능경영보고서`;
+  const yearFirst = /^(20\d{2}(?:[-–]20\d{2})?)[ -]+(.+?)[ -]+Sustainability[ -]*Report(?:[ -]+(?:Korean|KOR|KR|ENG|EN))?$/i.exec(title);
+  return yearFirst ? `${yearFirst[2]} ${yearFirst[1]} 지속가능경영보고서` : title;
 }

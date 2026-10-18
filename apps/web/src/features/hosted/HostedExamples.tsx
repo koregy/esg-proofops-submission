@@ -38,8 +38,9 @@ export function HostedExamples({ client }: { client: HostedClient }) {
       {login ? <div className="hosted-empty"><h2>로그인 후 분석 사례를 확인하세요</h2><p>보고서 접근 권한을 확인하기 위해 로그인이 필요합니다.</p><Link className="primary-link" to="/analyze?return_to=examples">로그인하고 사례 보기 →</Link></div> : <>
         {error && <p role="alert">{error}</p>}
         {!busy && !error && !examples.length && <div className="hosted-empty"><h2>아직 소개할 분석 사례가 없습니다</h2><p>이름과 완료 결과를 확인할 수 있는 보고서가 준비되면 표시됩니다.</p><Link to="/analyze">내 보고서로 이동 →</Link></div>}
-        <ul className="example-cards">{examples.map(({ run, name, identity, counts }) => <li className="example-card" key={identity}>
-          <div className="example-card-heading"><h2>{name}</h2><span className="hosted-state">{counts.provisional ? "이전 버전 결과" : "분석 완료"}</span></div>
+        <ul className="example-cards">{examples.map(({ run, name, identity, counts, completion }) => <li className="example-card" key={identity}>
+          <div className="example-card-heading"><h2>{name}</h2><span className="hosted-state">{completion.kind === "partial" ? completion.title : counts.provisional ? "이전 버전 결과" : "분석 완료"}</span></div>
+          {completion.kind === "partial" && <p className="hosted-note">{completion.meaning}</p>}
           <p className="hosted-note">접수 <time dateTime={run.created_at}>{new Date(run.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST</time></p>
           <p className="example-counts">추출 <strong>{counts.total}</strong>건 · 확정 <strong>{counts.confirmed}</strong> · 보류 <strong>{counts.hold}</strong>{counts.provisional > 0 && <> · 추가 확인 필요 <strong>{counts.provisional}</strong></>}</p>
           <div className="example-grade-bar" role="img" aria-label={`확정 등급 분포: ${["E3", "E2", "E1", "E0"].map(grade => `${grade} ${counts.confirmedGrades[grade]}건`).join(", ")}`}>

@@ -1,15 +1,18 @@
-import { metadataText, reportTitle, type DocumentMetadata } from "./documentName";
+import { documentName, metadataText, reportTitle, type DocumentMetadata } from "./documentName";
 
 /** Filename/title convention only; never guess a company from claim text or PDF author. */
 export function ux1CompanyName(document: DocumentMetadata): string | undefined {
   const explicit = metadataText(document.company_name);
   if (explicit) return explicit;
-  const name = document.ux1_metadata?.original_filename ?? document.original_filename ?? document.filename ?? document.ux1_metadata?.title ?? document.title;
-  const title = reportTitle(name);
+  const title = documentName(document);
   if (!title) return undefined;
-  const match = /^(.{2,60}?)\s*[-_ ]+20\d{2}\s*[-_ ]*(?:지속가능(?:경영)?|ESG|sustainability|sustainable)/i.exec(title);
-  const prefix = match?.[1] ?? /^(.{2,60}?)[_ -]+(?:sustainability(?:report)?|sustainable|ESG|지속가능(?:경영)?)(?:[_ -]|report|보고서|20\d{2}|$)/i.exec(title)?.[1];
-  return prefix && !/^20\d{2}$/.test(prefix) ? metadataText(prefix) : undefined;
+  const prefix = /^(.*?)[ -]+(?:지속가능(?:경영)?보고서|통합보고서|기업시민보고서|(?:sustainability|sustainable)[ -]*(?:report)?|ESG(?:[ -]*보고서)?|Report)(?=$|[ \d-])/i.exec(title)?.[1];
+  if (!prefix) return undefined;
+  const company = prefix
+    .replace(/^(?:20\d{2}(?:[-–]20\d{2})?년?(?:[ -]+|$))+/, "")
+    .replace(/(?:[ -]+20\d{2}(?:[-–]20\d{2})?년?)+$/, "").trim();
+  if (!company || company.split(/[ -]+/).every(token => /^(?:\d+|sr|kor|kr|eng|en|fn|final|esg)$/i.test(token))) return undefined;
+  return metadataText(company);
 }
 export async function uploadMetadata(file: Blob): Promise<{ original_filename?: string; title?: string }> {
   const original_filename = typeof File !== "undefined" && file instanceof File ? file.name.replace(/.*[/\\]/, "").replace(/[\x00-\x1f]/g, " ").slice(0,200) : undefined;
