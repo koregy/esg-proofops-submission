@@ -129,7 +129,7 @@ test("optional hold detail uses Korean text and never leaks known machine codes"
   const html = renderToStaticMarkup(React.createElement(ResultView, { result: { ...result, claims: [held] } }));
   assert.match(claimHoldReasons(held).join(" "), /판정 규칙에 미정 항목/);
   assert.match(html, /판정 규칙에 미정 항목/);
-  assert.match(html, /인정된 근거를 충분히 연결/);
+  assert.match(html, /주장에 대한 근거 요소를 정확히 판단할 수 없어/);
   assert.ok(claimHoldReasons(held).some(reason => reason === "인정된 근거 미연결(확인 필요)"));
   assert.match(html, /확인되지 않은 요소는 현재 분석 범위에서 인정된 근거와 연결되지 않았습니다/);
   assert.doesNotMatch(html, /근거 없음은 이 패킷에 인정된 근거/);

@@ -6,6 +6,20 @@ export function runIdFromHash(hash: string): string | null {
   return uuid.test(id) ? id : null;
 }
 export function validResourceId(id: string) { return uuid.test(id); }
+// Result tabs live in ?tab= so switching tabs never fires hashchange (which reopens and scrolls the run).
+export const resultTabs = ["overview", "claims", "source", "info"] as const;
+export type ResultTab = typeof resultTabs[number];
+export function resultTabFromSearch(search: string): ResultTab {
+  const value = new URLSearchParams(search).get("tab");
+  return resultTabs.find(tab => tab === value) ?? "overview";
+}
+/** Same path and other query params; only `tab` and the #run- anchor change. Overview stays implicit. */
+export function resultTabUrl(location: Pick<Location, "pathname" | "search">, runId: string, tab: ResultTab): string {
+  const params = new URLSearchParams(location.search);
+  if (tab === "overview") params.delete("tab"); else params.set("tab", tab);
+  const query = params.toString();
+  return `${location.pathname}${query ? `?${query}` : ""}#run-${runId}`;
+}
 // Links supply only an identifier; requests always use our authenticated client.
 export function runIdFromResultPath(path: string): string | null {
   const id = /^\/(?:v1\/runs\/([^/]+)\/result|runs\/([^/]+)\/result)\/?$/.exec(path);
@@ -18,7 +32,8 @@ export function runIdFromResultLink(input: string): string | null {
   if (!value.startsWith("/") && !/^https?:\/\//.test(value)) return null;
   try {
     const url = new URL(value, "https://proofops.invalid");
-    if (url.username || url.password || url.search) return null;
+    const tabOnly = url.pathname === "/analyze" && [...url.searchParams.keys()].every(key => key === "tab") && url.searchParams.getAll("tab").length <= 1;
+    if (url.username || url.password || (url.search && !tabOnly)) return null;
     if (url.pathname === "/analyze") return runIdFromHash(url.hash);
     if (url.hash) return null;
     return runIdFromResultPath(url.pathname.replace(/^\/hosted-api(?=\/)/, ""));

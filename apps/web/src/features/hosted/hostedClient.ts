@@ -421,7 +421,7 @@ const blockedReasons: Record<string, string> = {
 
   "근거 없음": "인정된 근거 미연결(확인 필요)",
   "근거 없음(검증된 검색 범위)": "인정된 근거 미연결(확인 필요)",
-  blocked_evidence: "인정된 근거를 충분히 연결할 수 없어 판정을 보류했습니다. 원문과 요소 상태를 확인해 주세요.",
+  blocked_evidence: "주장에 대한 근거 요소를 정확히 판단할 수 없어 입증 수준 판정을 보류했습니다.",
   blocked_rule_gap: "판정 규칙에 미정 항목이 있어 자동 판정을 보류했습니다.",
   linkage_unclear: "원문 인용과 요소의 연결을 확인해야 합니다.",
   SUPERLATIVE_UNRESOLVED: "최상급 표현의 비교 기준과 외부 검증 여부 확인이 필요합니다.",

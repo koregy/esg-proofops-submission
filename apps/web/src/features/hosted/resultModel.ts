@@ -370,6 +370,23 @@ export function w18HoldReason(result: HostedResult, claim: ResultClaim): string 
   return "보류 사유 미제공";
 }
 
+// Display-only short names; the full reason stays the filter key and goes in title/detail.
+const holdLabels: [RegExp, string][] = [
+  [/TIME_BUDGET|시간 한도/, "분석 시간 한도로 미처리"],
+  [/BUDGET|예산/, "분석 예산 한도로 미처리"],
+  [/처리 오류로 보류/, "처리 오류로 보류"],
+  [/상세 사유는 제공되지 않았습니다/, "상세 사유 미제공"],
+  [/사람 검토/, "사람 검토 대기"],
+  [/원문 대조가 끝나지 않아/, "근거 원문·위치 추가 확인"],
+  [/모델 판독이 합의되지 않아/, "3회 판단 불일치"],
+  [/예비 분류\(트랙\)가 합의되지 않아/, "주장 유형 미합의"],
+  [/관계가 정리되지 않아/, "주장·근거 연결 미확인"],
+];
+export function holdReasonLabel(reason: string): string {
+  if (reason.length <= 16) return reason;
+  return holdLabels.find(([pattern]) => pattern.test(reason))?.[1] ?? reason;
+}
+
 export function w18HoldBreakdown(result: HostedResult): { reason: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const claim of result.claims) {
