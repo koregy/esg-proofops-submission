@@ -9,7 +9,7 @@ import { claimRefs, originalRefPage } from "./sourcePageModel";
 import { SourceSplitView, type SourceSelection } from "./SourceSplitView";
 import { MissingEvidenceCard } from "../claims/MissingEvidenceCard";
 import { ProvisionalHold } from "../claims/ProvisionalHold";
-import { HostedApiError, holdReasonText, newIdempotencyKey, resultExecution, type HostedClient, type HostedResult, type ResultClaim, type ResultDecision, type ResultReview } from "./hostedClient";
+import { HostedApiError, holdReasonText, newIdempotencyKey, completedRunPresentation, resultExecution, type HostedClient, type HostedResult, type ResultClaim, type ResultDecision, type ResultReview } from "./hostedClient";
 import { claimSourceText, claimProcessingFailed, claimEvidenceLine, w18HoldReason, w18HoldBreakdown, allowedChoices, buildResolveBody, candidateRefs, claimHoldReasons, decisionLine, elementStateText, gradeSummary, groupClaimOccurrences, holdEvidenceNoteText, matchesResultFilters, openReviewFor, pageLabel, pageRanges, refKey, resultBrowserItem, resultBrowserSummary, resultElementText, resultScope, resultSourceFailures, reviewStatusText, tableObservationText, trackText, type ElementChoice, type ResultFilters } from "./resultModel";
 
 export function canReview(role: string | null | undefined) { return role === "reviewer" || role === "admin"; }
@@ -32,6 +32,7 @@ export function ResultView({ result, reportName, companyName, pageCount, selecte
   const counts = useMemo(() => resultBrowserSummary(result), [result]);
   const holdBreakdown = useMemo(() => w18HoldBreakdown(result), [result]);
   const execution = resultExecution(result, runStatus);
+  const completion = completedRunPresentation(result, runStatus);
   const scope = resultScope(result, pageCount, selectedPages);
   const failures = resultSourceFailures(result);
   const extraction = result.pipeline?.extraction_outcome;
@@ -56,6 +57,7 @@ export function ResultView({ result, reportName, companyName, pageCount, selecte
   return <section className={`hosted-result ${detailOpen ? "is-detail-open" : ""}`} aria-label="분석 결과" data-testid="hosted-result">
     <header className="demo-heading result-heading"><div><p className="eyebrow">분석 결과{typeof result.pipeline?.reporting_scope?.report_year === "number" ? ` · ${result.pipeline.reporting_scope.report_year}` : ""}</p>
       <h2 tabIndex={-1} data-testid="result-heading">{reportName ?? (companyName ? `${companyName} · 분석 결과` : "보고서 분석 결과")}</h2>
+      {completion?.kind === "partial" && <p className="hosted-note" data-testid="result-completion-status">{completion.title}</p>}
       <p>보고서의 주장을 원문 근거와 대조한 결과입니다. 문장을 선택하면 판정 근거를 확인할 수 있습니다.</p></div><button type="button" className="hosted-secondary result-export" onClick={() => downloadResultReport(result, { reportName, companyName, pageCount, selectedPages, runStatus, runId })}>결과 보고서 내보내기</button></header>
     <div className="ux1-export"><label>PDF 구성 <select value={reportMode} onChange={event => setReportMode(event.target.value as "summary" | "full")}><option value="summary">요약본</option><option value="full">전체 상세</option></select></label><button type="button" className="hosted-primary" onClick={() => { setPrintError(""); if (!printResultReport(result, { reportMode, reportName, companyName, pageCount, selectedPages, runStatus, runId })) setPrintError("인쇄 창이 차단되었습니다. 팝업을 허용한 뒤 다시 시도해 주세요."); }}>PDF 리포트 저장</button><span className="caption">인쇄 창에서 ‘PDF로 저장’ 선택 · {reportMode === "summary" ? "요약·등급 분포·확정 주장 목록·주요 보류 사유" : "전체 주장·요소별 근거 포함"}</span>{printError && <p role="alert">{printError}</p>}</div>
     <GradeGuide />

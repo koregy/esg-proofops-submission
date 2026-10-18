@@ -1,29 +1,35 @@
-import { cleanReportName, reportNames, reportTitle } from "./documentName";
-import { HostedApiError, resultExecution, type CollectionPage, type HostedClient, type HostedDocument, type HostedResult, type ListedRun } from "./hostedClient";
+import { reportNames } from "./documentName";
+import { HostedApiError, completedRunPresentation, type CollectionPage, type HostedClient, type HostedDocument, type HostedResult, type ListedRun } from "./hostedClient";
 import { resultBrowserSummary } from "./resultModel";
 import { UX1_HASH } from "./ux1Model";
 
 // Coordinator-approved v29d default; compared with the result's actual analysis policy.
 // UI/UX policy hashes and the reuse wrapper policy are not analysis-policy identities.
 export const CURRENT_EXAMPLE_POLICY = "f29385d0c74d1520350deb06eaa9e11b72c5829dfaefeb2417c4e8ac0fed4ebd";
-export type Example = { run: ListedRun; name: string; identity: string; counts: ReturnType<typeof resultBrowserSummary> };
+export type Example = { run: ListedRun; name: string; identity: string; counts: ReturnType<typeof resultBrowserSummary>; completion: NonNullable<ReturnType<typeof completedRunPresentation>> };
 export const exampleRuns = (runs: ListedRun[]) => runs.filter(run => run.status === "completed")
   .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 
 export async function chooseExample(runs: ListedRun[], readResult: (url: string) => Promise<HostedResult>) {
-  let unpinned: { run: ListedRun; result: HostedResult } | null = null;
+  type Candidate = { run: ListedRun; result: HostedResult; completion: NonNullable<ReturnType<typeof completedRunPresentation>> };
+  let unpinned: Candidate | null = null, currentPartial: Candidate | null = null;
   let hasPolicy = false;
   for (const run of exampleRuns(runs)) {
     if (!run.result_url) continue;
     const result = await readResult(run.result_url);
     const policy = result.reuse?.source_policy_sha256 || result.pipeline?.scope?.analysis_profile_sha256;
     hasPolicy ||= !!policy;
-    if (resultExecution(result, run.status).kind !== "completed") continue;
-    if (policy === CURRENT_EXAMPLE_POLICY) return { run, result };
-    if (!policy && !unpinned) unpinned = { run, result };
+    const completion = completedRunPresentation(result, run.status);
+    if (!completion) continue;
+    const candidate = { run, result, completion };
+    if (policy === CURRENT_EXAMPLE_POLICY) {
+      if (completion.kind === "completed") return candidate;
+      currentPartial ??= candidate;
+    }
+    // Preserve no-policy compatibility for fully complete results only.
+    if (!policy && completion.kind === "completed" && !unpinned) unpinned = candidate;
   }
-  // Compatibility for APIs that expose no policy for this report, never a known old policy.
-  return hasPolicy ? null : unpinned;
+  return currentPartial ?? (hasPolicy ? null : unpinned);
 }
 
 async function allPages<T>(read: (cursor: string | null) => Promise<CollectionPage<T>>, signal: AbortSignal): Promise<T[]> {
@@ -49,15 +55,15 @@ export async function loadExamples(client: HostedClient, signal: AbortSignal): P
   for (const run of exampleRuns(runs)) {
     const doc = docs.get(run.document_id);
     if (!doc) continue;
-    const name = reportTitle(doc.ux1_metadata?.title) ?? reportTitle(doc.title) ?? names[doc.document_id];
+    const name = names[doc.document_id];
     if (!name) continue; // Unnamed test uploads belong in full history, not the showcase.
     const identity = doc.sha256 || doc.original_filename || doc.filename || doc.ux1_metadata?.original_filename || doc.document_id;
-    const group = groups.get(identity) ?? { name: cleanReportName(name), runs: [] };
+    const group = groups.get(identity) ?? { name, runs: [] };
     group.runs.push(run); groups.set(identity, group);
   }
   const examples = await Promise.all([...groups].map(async ([identity, group]) => {
     const chosen = await chooseExample(group.runs, url => client.getResult(url, signal, UX1_HASH));
-    return chosen ? { run: chosen.run, name: group.name, identity, counts: resultBrowserSummary(chosen.result) } : null;
+    return chosen ? { run: chosen.run, name: group.name, identity, completion: chosen.completion, counts: resultBrowserSummary(chosen.result) } : null;
   }));
   signal.throwIfAborted();
   return examples.filter((example): example is Example => example !== null).sort((a, b) => Date.parse(b.run.created_at) - Date.parse(a.run.created_at));

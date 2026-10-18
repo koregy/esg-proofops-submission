@@ -2,7 +2,7 @@ import { ux1CompanyName, uploadMetadata } from "./ux1Metadata";
 import { UX1_HASH } from "./ux1Model";
 import { UX1Progress } from "./UX1Progress";
 import { UX1Comparison } from "./UX1Comparison";
-import { documentName } from "./documentName";
+import { documentName, reportTitle } from "./documentName";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { budgetNotice, createHostedClient, holdReasonText, HostedApiError, parsePageSelection, providerLimitCodes, providerLimitMessage, runOutcome, terminalStatuses, type HostedClient, type HostedDocument, type HostedResult, type HostedRun, type Runtime, type Session, type ScopePlan } from "./hostedClient";
@@ -111,7 +111,7 @@ export function HostedAnalysis({ client: injected }: { client?: HostedClient }) 
       const document = await client.getDocument(next.document_id);
       if (!session || !currentSession.current || historyKey(currentSession.current) !== historyKey(session)) return;
       const savedName = session ? readHistory(historyStore, historyKey(session)).find(entry => entry.documentId === document.document_id)?.name : undefined;
-      const name = documentName(document, savedName) ?? "분석 보고서";
+      const name = documentName(document) ?? reportTitle(savedName) ?? "분석 보고서";
       if (session) setHistory(rememberHistory(historyStore, historyKey(session), { documentId: document.document_id, name, runId: id, seenAt: Date.now() }));
       setIntake(items => items.some(item => item.runId === id) ? items : [...items, { key: id, name, doc: document, runId: id, restoreRunId: id, restored: true }]);
       window.history.replaceState(null, "", `#run-${id}`);
@@ -457,7 +457,7 @@ function HostedDocumentAnalysis({ name, doc, client, runtime, session, initialRu
     {run && <RunOutcomeView run={result ? { ...run, result } : run} />}
     {run?.error_code && <p className="hosted-error">{holdReasonText(run.provider_error_code ?? run.error_code)}</p>}
     </IntakeSurface>
-    {result && run && <div ref={resultRegion} className="hosted-result-region"><ResultView reportName={documentName(doc, name)} companyName={ux1CompanyName(doc)} pageCount={doc.page_count} selectedPages={run.selected_pages} runStatus={run.status} result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} /></div>}
+    {result && run && <div ref={resultRegion} className="hosted-result-region"><ResultView reportName={documentName(doc) ?? reportTitle(name)} companyName={ux1CompanyName(doc)} pageCount={doc.page_count} selectedPages={run.selected_pages} runStatus={run.status} result={result} role={session?.role} client={client} runId={run.run_id} onReload={reloadResult} /></div>}
     {running && <button className="hosted-secondary" type="button" disabled={!!busy} onClick={() => void cancel()}>분석 취소</button>}
     <div className="hosted-document-footer">
     {doc && <p className="hosted-note">업로드한 PDF는 올린 본인 또는 작업 공간 관리자가 삭제할 수 있습니다. 삭제하면 원본과 분석 기록이 함께 지워집니다.</p>}

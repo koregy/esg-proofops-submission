@@ -498,11 +498,29 @@ export function runOutcome(run: HostedRun): { kind: "pending" | "blocked" | "com
   }
 }
 
+/** Completed run with a known extraction gap; claims and grades are unchanged. */
+export function completedRunPresentation(result: HostedResult, runStatus?: string) {
+  if (runStatus !== "completed" || (result.pipeline?.status && result.pipeline.status !== "completed")) return null;
+  const extraction = result.pipeline?.extraction_outcome;
+  // The backend publishes successful extraction as "claims"; "completed" is kept for older results.
+  if (extraction?.status && !["claims", "completed", "partial"].includes(extraction.status)) return null;
+  const sources = extraction?.failed_sources?.length ?? 0, pages = extraction?.page_failures?.length ?? 0;
+  if (sources || pages) return {
+    kind: "partial" as const,
+    title: ["분석 완료", ...(sources ? [`미처리 원문 ${sources}건`] : []), ...(pages ? [`미처리 ${pages}쪽`] : [])].join(" · "),
+    meaning: "일부 쪽·원문의 처리가 완료되지 않아 처리된 주장만 표시합니다. 미처리 원문은 판정하지 않았습니다.",
+  };
+  if (extraction?.status === "partial") return null; // No count: do not imply a known complete scope.
+  return { kind: "completed" as const, title: "분석 완료 · 선택 범위", meaning: "선택한 범위의 처리가 끝났습니다. 주장별 확정·보류 상태와 근거를 확인하세요." };
+}
+
 /** Presentation only: terminal completion does not imply successful extraction or a final grade. */
 export function resultExecution(result?: HostedResult | null, runStatus?: string) {
   const status = runStatus ?? result?.pipeline?.status;
   const extraction = result?.pipeline?.extraction_outcome;
   if (status === "failed" || result?.pipeline?.status === "failed") return { kind: "failed", title: "실행 실패", meaning: "처리 중 오류로 분석이 끝났습니다. 남아 있는 결과만 표시하며 미처리 원문은 판정하지 않았습니다." };
+  const completed = result && completedRunPresentation(result, runStatus);
+  if (completed) return completed;
   if ([status, result?.pipeline?.status, extraction?.status].some(value => ["partial", "partial_blocked", "blocked", "accounting_pending"].includes(value ?? "")) || extraction?.failed_sources?.length || extraction?.page_failures?.length) {
     return { kind: "partial", title: "부분 완료 · 미처리 범위 확인", meaning: "일부 쪽·원문의 처리가 완료되지 않아 처리된 주장만 표시합니다. 미처리 범위는 아래 안내에서 확인하세요." };
   }
